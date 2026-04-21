@@ -1,0 +1,64 @@
+###############################################################################
+# Usharr configuration file.
+#
+# Copy this file to config.yaml and update per the comments below.
+#
+# Configuring `library` is required. Each entry is a category name mapped
+# to one or more paths (as mounted inside the OCI container). The category
+# name is shown in the top nav and used as the library slug. Background
+# scans + service syncs run hourly.
+library:
+  Movies:
+    - /media/Movies
+  Documentaries:
+    - /media/Documentaries
+  Series:
+    - /media/TV Shows
+
+###############################################################################
+# Enable Plex Media Server integration (optional)
+# Provides:
+#   1. Deep linking to video files in Plex Media Server
+#   2. Ability to query API by Plex ratingKey
+# Note: required by tautulli integration
+#
+# plex:
+#   url: https://plex.example.com
+
+###############################################################################
+# Enable Tautulli integration (optional)
+# Note: requires Plex Media Server integration
+#
+# tautulli:
+#   url: https://plexdash.example.com
+
+###############################################################################
+# Enable Bazarr integration (optional)
+# Provides: deep linking to video files in Bazarr
+#
+# bazarr:
+#   url: https://bazarr.example.com
+#   api_key: 11223344556677889900aabbccddeeff
+#   path_map:
+#     "/media/Movies": /some/where/else/Movies
+#     "/media/TV Shows": /some/where/else/TV Shows
+
+######################################################
+# Enable Radarr integration (optional)
+# Provides: deep linking to video files in Radarr
+#
+# radarr:
+#   url: https://radarr.example.com
+#   api_key: 11223344556677889900aabbccddeeff
+#   path_map:
+#     "/media/Movies": /some/where/else/Movies
+
+######################################################
+# Enable Sonarr integration (optional)
+# Provides: deep linking to video files in Sonarr
+#
+# sonarr:
+#   url: https://sonarr.example.com
+#   api_key: 11223344556677889900aabbccddeeff
+#   path_map:
+#     "/media/TV Shows": /some/where/else/TV Shows

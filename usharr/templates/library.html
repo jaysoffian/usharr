@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}{{ label }} — usharr{% endblock %}
+{% block content %}
+{% if rows %}
+<div class="table-pad"></div>
+<nav class="letter-rail" aria-label="Jump to letter">
+{%- for L in jump_letters -%}
+  {% if L in available_letters %}<a href="#jump-{{ L }}">{{ L }}</a>{% else %}<span class="disabled">{{ L }}</span>{% endif %}
+{%- endfor -%}
+</nav>
+<table class="library">
+<thead{% if is_tv %} class="clickable"{% endif %}>
+  <tr>
+    <th>Title <span class="th-count">({% if episodes is not none %}{{ titles }} / {{ episodes }}{% else %}{{ titles }}{% endif %})</span></th>
+    <th class="narrow">Year</th>
+    <th class="narrow">AR</th>
+    <th>Video</th>
+    <th>Audio</th>
+    <th class="narrow">Eng Subs</th>
+    <th class="narrow">Links</th>
+  </tr>
+</thead>
+<tbody>
+{% for r in rows %}
+  {% if r.kind == "show" %}
+  <tr class="show-header" data-show-title="{{ r.show_title }}"{% if r.jump_letter %} id="jump-{{ r.jump_letter }}"{% endif %}>
+    <td class="title show-title" colspan="7">{{ r.display_title }}{% if r.season_count and r.episode_count %}<span class="show-counts"> · {{ r.season_count }} season{{ 's' if r.season_count != 1 else '' }} · {{ r.episode_count }} episode{{ 's' if r.episode_count != 1 else '' }}</span>{% endif %}</td>
+  </tr>
+  {% elif r.kind == "season" %}
+  <tr class="season-header" data-show-title="{{ r.show_title }}" data-season-num="{{ r.season_number }}">
+    <td class="title season-title" colspan="7">{{ r.display_title }}</td>
+  </tr>
+  {% else %}
+  <tr class="{{ 'scan-error' if r.has_error else '' }}"
+      {% if r.jump_letter %}id="jump-{{ r.jump_letter }}"{% endif %}
+      {% if r.kind == 'episode' %}data-show-title="{{ r.plex_show_title }}" data-season-num="{{ r.plex_season_number or 0 }}"{% endif %}
+      data-href="/item?path={{ r.path|urlencode }}">
+    <td class="title{% if r.kind == 'episode' %} episode-title{% endif %}"><a href="/item?path={{ r.path|urlencode }}">{{ r.display_title }}{% if r.edition %} <span class="edition">{{ r.edition }}</span>{% endif %}</a></td>
+    <td class="narrow">{{ r.plex_year or '' }}</td>
+    <td class="narrow ars">
+      {% for a in r.aspects %}<span class="{{ 'ar primary' if a.is_primary else 'ar' }}">{{ a.ratio|round(2) }}</span>{% if not loop.last %} {% endif %}{% endfor %}{% if r.aspects_truncated %} <span class="ar-more">…</span>{% endif %}
+    </td>
+    <td class="video">{{ r.video_summary }}</td>
+    <td class="audio">{{ r.audio_summary }}</td>
+    <td class="narrow subs">
+      {% if r.sub_chip %}<span class="sub-chip">{{ r.sub_chip.fmt }}{% if r.sub_chip.sdh %}<span class="sub-sdh">SDH</span>{% endif %}</span>{% endif %}
+    </td>
+    <td class="narrow links">
+      <span class="svc-group">
+        {% if r.plex_url %}<a class="svc svc-plex" href="{{ r.plex_url }}" target="_blank" rel="noopener" title="Plex"></a>{% endif %}
+        {% if r.tautulli_url %}<a class="svc svc-tautulli" href="{{ r.tautulli_url }}" target="_blank" rel="noopener" title="Tautulli"></a>{% endif %}
+        {% if r.bazarr_url %}<a class="svc svc-bazarr" href="{{ r.bazarr_url }}" target="_blank" rel="noopener" title="Bazarr"></a>{% endif %}
+        {% if r.radarr_url %}<a class="svc svc-radarr" href="{{ r.radarr_url }}" target="_blank" rel="noopener" title="Radarr"></a>{% endif %}
+        {% if r.sonarr_url %}<a class="svc svc-sonarr" href="{{ r.sonarr_url }}" target="_blank" rel="noopener" title="Sonarr"></a>{% endif %}
+      </span>
+    </td>
+  </tr>
+  {% endif %}
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p class="empty">No media files scanned under <code>{{ label }}</code> yet.</p>
+{% endif %}
+
+<script>
+(function() {
+  const tbody = document.querySelector('table.library tbody');
+  if (!tbody) return;
+
+  // Publish the sticky thead's height so the show-header sticky top
+  // and jump scroll-margin can calc against it without guessing.
+  const thead = document.querySelector('table.library thead');
+  if (thead) {
+    const setTheadH = () => document.documentElement.style.setProperty('--thead-h', thead.offsetHeight + 'px');
+    setTheadH();
+    window.addEventListener('resize', setTheadH);
+  }
+
+  // --- episode row → detail navigation (unchanged) ---
+  function navigate(e, tr) {
+    const url = tr.dataset.href;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || (e.type === 'auxclick' && e.button === 1)) {
+      window.open(url);
+    } else {
+      window.location = url;
+    }
+  }
+
+  // --- collapsible TV shows ---
+  // Group episode <tr>s by "show\tseason" key. Toggle display:none on
+  // the rows to roll a season up/down; season + show header rows
+  // always stay visible.
+  const episodesByKey = new Map();
+  tbody.querySelectorAll('tr[data-show-title][data-season-num]').forEach(tr => {
+    if (tr.classList.contains('season-header')) return;
+    const key = tr.dataset.showTitle + '\t' + tr.dataset.seasonNum;
+    if (!episodesByKey.has(key)) episodesByKey.set(key, []);
+    episodesByKey.get(key).push(tr);
+  });
+  const collapsed = new Set();
+
+  const table = tbody.parentElement;
+  function applyCollapse() {
+    episodesByKey.forEach((rows, key) => {
+      const hide = collapsed.has(key);
+      rows.forEach(r => { r.style.display = hide ? 'none' : ''; });
+    });
+    // Reflect fully-collapsed state for CSS (hides non-Title column
+    // labels so the thead reads as a single clickable "Title" band).
+    const allCollapsed = episodesByKey.size > 0 &&
+      [...episodesByKey.keys()].every(k => collapsed.has(k));
+    table.classList.toggle('all-collapsed', allCollapsed);
+  }
+
+  function seasonKey(show, season) { return show + '\t' + season; }
+
+  function showKeys(show) {
+    return [...episodesByKey.keys()].filter(k => k.startsWith(show + '\t'));
+  }
+
+  function toggleSeason(key) {
+    if (collapsed.has(key)) collapsed.delete(key);
+    else collapsed.add(key);
+    applyCollapse();
+  }
+
+  function toggleShow(show) {
+    const keys = showKeys(show);
+    if (keys.length === 0) return;
+    const anyExpanded = keys.some(k => !collapsed.has(k));
+    if (anyExpanded) keys.forEach(k => collapsed.add(k));
+    else keys.forEach(k => collapsed.delete(k));
+    applyCollapse();
+  }
+
+  function toggleAll() {
+    const allCollapsed = episodesByKey.size > 0 &&
+      [...episodesByKey.keys()].every(k => collapsed.has(k));
+    if (allCollapsed) collapsed.clear();
+    else episodesByKey.forEach((_, k) => collapsed.add(k));
+    applyCollapse();
+  }
+
+  // Click the table-header row (TV libs only) to collapse / expand
+  // every season at once — mirrors the show / season header clicks
+  // but at the library level.
+  const clickableThead = document.querySelector('table.library thead.clickable');
+  if (clickableThead) {
+    clickableThead.addEventListener('click', toggleAll);
+  }
+
+  // --- dispatch clicks on tbody rows ---
+  tbody.addEventListener('click', function(e) {
+    if (e.target.closest('a,button,form')) return;
+    const showHeader = e.target.closest('tr.show-header');
+    if (showHeader) { toggleShow(showHeader.dataset.showTitle); return; }
+    const seasonHeader = e.target.closest('tr.season-header');
+    if (seasonHeader) {
+      toggleSeason(seasonKey(seasonHeader.dataset.showTitle, seasonHeader.dataset.seasonNum));
+      return;
+    }
+    const tr = e.target.closest('tr[data-href]');
+    if (tr) navigate(e, tr);
+  });
+  tbody.addEventListener('auxclick', function(e) {
+    if (e.button !== 1) return;
+    if (e.target.closest('a,button,form')) return;
+    const tr = e.target.closest('tr[data-href]');
+    if (tr) { e.preventDefault(); navigate(e, tr); }
+  });
+})();
+</script>
+{% endblock %}

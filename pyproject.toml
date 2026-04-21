@@ -1,0 +1,47 @@
+[project]
+name = "usharr"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi",
+    "httpx",
+    "jinja2",
+    "langcodes>=3.5",
+    "language-data>=1.3",
+    "pydantic>=2",
+    "pymediainfo>=6",
+    "ruamel-yaml>=0.19.1",
+    "uvicorn[standard]",
+]
+
+[dependency-groups]
+dev = []
+
+[project.scripts]
+usharr = "usharr.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["usharr"]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "A", "C4",
+    "SIM", "PL", "RUF", "PIE", "RET", "PERF", "FURB",
+    "LOG", "G", "T20", "PTH", "TID",
+]
+ignore = ["PLR09", "PLR2004", "PLW2901", "SIM108", "BLE001"]
+
+[tool.ruff.lint.per-file-ignores]
+"usharr/cli.py" = ["T201"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"

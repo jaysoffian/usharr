@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.claude/settings.local.json
+.ruff_cache/
+mise.local.toml
+config.yaml
+usharr.tar
+*.db
+*.db-wal
+*.db-shm

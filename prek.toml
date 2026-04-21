@@ -1,0 +1,51 @@
+# Configuration file for `prek`, a git hook framework written in Rust.
+# See https://prek.j178.dev for more information.
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "check-added-large-files" },
+  { id = "check-case-conflict" },
+  { id = "check-executables-have-shebangs" },
+  { id = "check-merge-conflict" },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+  { id = "end-of-file-fixer" },
+  { id = "trailing-whitespace" },
+]
+
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.15.10"
+hooks = [
+  {
+    id = "ruff",
+    name = "ruff check",
+    args = ["--fix"]
+  },
+  {
+    id = "ruff-format",
+    name = "ruff format"
+  }
+]
+
+[[repos]]
+repo = "https://github.com/RobertCraigie/pyright-python"
+rev = "v1.1.408"
+hooks = [
+  { id = "pyright" }
+]
+
+[[repos]]
+repo = "https://github.com/AleksaC/hadolint-py"
+rev = "v2.14.0"
+hooks = [
+  {
+    id = "hadolint",
+    args = [
+      # DL3018: pinning apk versions is moot under `FROM alpine:edge`.
+      "--ignore", "DL3018"
+    ]
+  }
+]

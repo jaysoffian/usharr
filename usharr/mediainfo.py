@@ -1,0 +1,512 @@
+"""Container/codec/track extraction via pymediainfo."""
+
+import asyncio
+import logging
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from pymediainfo import MediaInfo
+
+from usharr.db import AudioTrackRow, SubtitleTrackRow
+from usharr.langs import norm_lang
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class VideoInfo:
+    codec: str
+    profile: str | None
+    width: int
+    height: int
+    bit_depth: int | None
+    hdr: str | None
+    hdr_format: str | None
+    frame_rate: float | None
+    bit_rate: int | None = None
+    max_bit_rate: int | None = None
+
+
+@dataclass
+class AudioTrack:
+    idx: int
+    codec: str
+    channels: int
+    layout: str | None
+    language: str | None
+    title: str | None
+    is_default: bool
+    is_forced: bool
+    format: str | None = None
+    commercial_name: str | None = None
+    bit_rate: int | None = None
+    bit_rate_mode: str | None = None
+    sample_rate: int | None = None
+    bit_depth: int | None = None
+    compression_mode: str | None = None
+
+
+@dataclass
+class SubtitleTrack:
+    idx: int
+    codec: str
+    language: str | None
+    title: str | None
+    is_default: bool
+    is_forced: bool
+    is_sdh: bool
+
+
+@dataclass
+class MediaInfoResult:
+    container: str | None
+    duration: float | None
+    video: VideoInfo | None
+    audio: list[AudioTrack] = field(default_factory=list)
+    subtitle: list[SubtitleTrack] = field(default_factory=list)
+
+
+# --- helpers --------------------------------------------------------------
+
+
+def _get(track: object, *names: str) -> str | None:
+    for n in names:
+        v = getattr(track, n, None)
+        if v not in (None, ""):
+            return str(v)
+    return None
+
+
+def _int(v: str | None) -> int | None:
+    if v is None:
+        return None
+    try:
+        return int(str(v).split()[0].split(".")[0])
+    except ValueError, IndexError:
+        return None
+
+
+def _float(v: str | None) -> float | None:
+    if v is None:
+        return None
+    try:
+        return float(str(v).split()[0])
+    except ValueError, IndexError:
+        return None
+
+
+def _bool(v: str | None) -> bool:
+    if v is None:
+        return False
+    return str(v).strip().lower() in {"yes", "true", "1"}
+
+
+# --- normalization ---------------------------------------------------------
+
+_VIDEO_ALIAS = {
+    "AVC": "AVC",
+    "H264": "AVC",
+    "H.264": "AVC",
+    "HEVC": "HEVC",
+    "H265": "HEVC",
+    "H.265": "HEVC",
+    "AV1": "AV1",
+    "VC1": "VC-1",
+    "VC-1": "VC-1",
+    "VP9": "VP9",
+    "VP8": "VP8",
+    "MPEG-4 VISUAL": "MPEG-4",
+    "MPEG VIDEO": "MPEG-2",
+}
+
+
+def _norm_video_codec(fmt: str | None, codec_id: str | None) -> str:
+    raw = (fmt or codec_id or "").strip().upper()
+    return _VIDEO_ALIAS.get(raw, raw or "Unknown")
+
+
+_AUDIO_ALIAS = {
+    "E-AC-3": "EAC3",
+    "EAC3": "EAC3",
+    "AC-3": "AC3",
+    "AC3": "AC3",
+    "MLP FBA": "TrueHD",
+    "TRUEHD": "TrueHD",
+    "AAC": "AAC",
+    "FLAC": "FLAC",
+    "OPUS": "Opus",
+    "PCM": "PCM",
+    "VORBIS": "Vorbis",
+    "MPEG AUDIO": "MP3",
+}
+
+
+def _norm_audio_codec(
+    fmt: str | None,
+    profile: str | None,
+    commercial: str | None,
+) -> str:
+    """Resolve a user-facing codec name.
+
+    Commercial name is the most authoritative source (e.g. "DTS-HD Master
+    Audio", "Dolby TrueHD with Dolby Atmos"). Fall back to
+    format + format_profile.
+    """
+    raw = (fmt or "").strip().upper()
+    prof = (profile or "").upper()
+    cn = (commercial or "").upper()
+
+    if cn:
+        if "DTS-HD MASTER" in cn:
+            return "DTS-HD MA"
+        if "DTS-HD HIGH" in cn:
+            return "DTS-HD HRA"
+        if "DTS:X" in cn or "DTS-X" in cn:
+            return "DTS:X"
+        if "DTS EXPRESS" in cn:
+            return "DTS Express"
+        if "DTS-ES" in cn:
+            return "DTS-ES"
+        if "TRUEHD" in cn and "ATMOS" in cn:
+            return "TrueHD Atmos"
+        if "DOLBY DIGITAL PLUS" in cn and "ATMOS" in cn:
+            return "EAC3 Atmos"
+        if "DOLBY DIGITAL PLUS" in cn or "E-AC-3" in cn:
+            return "EAC3"
+        if "DOLBY DIGITAL" in cn:
+            return "AC3"
+        if "DOLBY TRUEHD" in cn:
+            return "TrueHD"
+
+    if raw in {"DTS", "DTS XLL", "DTS XBR", "DTS ES", "DTS LBR"}:
+        if "MA" in prof:
+            return "DTS-HD MA"
+        if "HRA" in prof or "HIGH RESOLUTION" in prof:
+            return "DTS-HD HRA"
+        if "ES" in prof or raw == "DTS ES":
+            return "DTS-ES"
+        return "DTS"
+    return _AUDIO_ALIAS.get(raw, raw or "Unknown")
+
+
+_SUB_ALIAS = {
+    "PGS": "PGS",
+    "HDMV PGS": "PGS",
+    "PGSSUB": "PGS",
+    "SUBRIP": "SRT",
+    "SRT": "SRT",
+    "ASS": "ASS",
+    "SSA": "SSA",
+    "VOBSUB": "VobSub",
+    "DVB SUBTITLE": "DVB",
+    "DVB_SUB": "DVB",
+    "WEBVTT": "WebVTT",
+    "UTF-8": "SRT",
+    "TIMED TEXT": "TX3G",
+    "TELETEXT": "Teletext",
+}
+
+
+def _norm_sub_codec(fmt: str | None, codec_id: str | None) -> str:
+    raw = (fmt or codec_id or "").strip().upper()
+    for prefix in ("S_HDMV/", "S_TEXT/", "S_VOBSUB", "S_"):
+        if raw.startswith(prefix):
+            raw = raw.removeprefix(prefix)
+            break
+    return _SUB_ALIAS.get(raw, raw or "Unknown")
+
+
+def _build_hdr_format(track: object) -> str | None:
+    """Compose the fullest HDR description available.
+
+    pymediainfo exposes HDR metadata across several fields:
+      - hdr_format / hdr_format_string: the text summary
+      - hdr_format_version: e.g. "1.0"
+      - hdr_format_profile: e.g. "dvhe.07.06"
+      - hdr_format_settings: e.g. "BL+EL+RPU" (the layer structure)
+      - hdr_format_compatibility: e.g. "HDR10 compatible"
+    Some builds populate only `hdr_format` with everything concatenated;
+    others split across these fields, using `" / "` as a per-stream
+    separator (e.g. "dvhe.07 / " for Profile 7, where the enhancement
+    stream has no value of its own). Strip those empties and join in
+    MediaInfo's canonical comma-separated form.
+    """
+    full = _get(track, "hdr_format_string")
+    if full:
+        return _clean_slashes(full)
+    base = _get(track, "hdr_format")
+    if not base:
+        return None
+    base = _clean_slashes(base)
+    extras: list[str] = []
+    for name in (
+        "hdr_format_version",
+        "hdr_format_profile",
+        "hdr_format_settings",
+        "hdr_format_compatibility",
+    ):
+        v = _get(track, name)
+        if not v:
+            continue
+        cleaned = _clean_slashes(v)
+        if cleaned and cleaned not in base:
+            extras.append(cleaned)
+    if extras:
+        return base + ", " + ", ".join(extras)
+    return base
+
+
+def _clean_slashes(v: str) -> str:
+    """Drop empty segments around MediaInfo's per-stream `' / '` separator."""
+    return " / ".join(p.strip() for p in v.split("/") if p.strip())
+
+
+_DV_PROFILE_RE = re.compile(r"dv(?:he|av)\.(\d{1,2})", re.IGNORECASE)
+
+
+def _dv_profile_num(track: object) -> int | None:
+    """Return the Dolby Vision major profile (5, 7, 8, ...) if present."""
+    profile = _get(track, "hdr_format_profile") or ""
+    m = _DV_PROFILE_RE.search(profile)
+    return int(m.group(1)) if m else None
+
+
+def _detect_hdr(track: object) -> str | None:
+    hdr_fmt = (_get(track, "hdr_format", "hdr_format_commercial") or "").lower()
+    xfer = (_get(track, "transfer_characteristics") or "").lower()
+
+    has_dv = "dolby vision" in hdr_fmt or "dolbyvision" in hdr_fmt
+    # HDR10+: dynamic metadata (SMPTE ST 2094 App 4). Matching by the
+    # standard name catches files that don't literally say "HDR10+".
+    has_hdr10p = (
+        "hdr10+" in hdr_fmt or "hdr10 plus" in hdr_fmt or "smpte st 2094" in hdr_fmt
+    )
+    # HDR10: static metadata (SMPTE ST 2086). Don't match "hdr10" alone
+    # as substring of "hdr10+". HDR10+ implies HDR10 baseline, so if
+    # dynamic metadata is present we force the baseline on too.
+    has_hdr10 = (
+        has_hdr10p
+        or "smpte st 2086" in hdr_fmt
+        or (
+            "hdr10" in hdr_fmt
+            and "hdr10+" not in hdr_fmt
+            and "hdr10 plus" not in hdr_fmt
+        )
+    )
+    has_hlg = "hlg" in hdr_fmt or "hybrid log-gamma" in xfer or xfer == "arib std-b67"
+
+    parts = []
+    if has_dv:
+        p = _dv_profile_num(track)
+        parts.append(f"DV({p})" if p is not None else "DV")
+    if has_hdr10:
+        parts.append("HDR10")
+    if has_hdr10p:
+        parts.append("HDR10+")
+    if has_hlg:
+        parts.append("HLG")
+    return "/".join(parts) if parts else None
+
+
+_CHANNEL_LAYOUT = {
+    1: "1.0",
+    2: "2.0",
+    3: "2.1",
+    6: "5.1",
+    7: "6.1",
+    8: "7.1",
+}
+
+
+def _layout(channels: int | None) -> str | None:
+    if channels is None:
+        return None
+    return _CHANNEL_LAYOUT.get(channels, f"{channels}ch")
+
+
+def _is_sdh(title: str | None) -> bool:
+    if not title:
+        return False
+    t = title.lower()
+    return (
+        "sdh" in t
+        or "hard of hearing" in t
+        or "hearing impaired" in t
+        or " cc" in f" {t}"
+    )
+
+
+# --- parse ----------------------------------------------------------------
+
+
+def _parse_sync(path: Path) -> MediaInfoResult:
+    mi = MediaInfo.parse(str(path))
+    container: str | None = None
+    duration_s: float | None = None
+    overall_bit_rate: int | None = None
+    file_size: int | None = None
+    video: VideoInfo | None = None
+    video_stream_br: int | None = None
+    video_nominal_br: int | None = None
+    audio: list[AudioTrack] = []
+    subtitle: list[SubtitleTrack] = []
+
+    audio_idx = 0
+    sub_idx = 0
+
+    for t in mi.tracks:
+        tt = t.track_type
+        if tt == "General":
+            container = _get(t, "format") or path.suffix.lstrip(".").upper() or None
+            dur_ms = _float(_get(t, "duration"))
+            if dur_ms is not None:
+                duration_s = dur_ms / 1000.0
+            overall_bit_rate = _int(_get(t, "overall_bit_rate"))
+            file_size = _int(_get(t, "file_size"))
+        elif tt == "Video" and video is None:
+            video_stream_br = _int(_get(t, "bit_rate"))
+            video_nominal_br = _int(_get(t, "nominal_bit_rate"))
+            video = VideoInfo(
+                codec=_norm_video_codec(_get(t, "format"), _get(t, "codec_id")),
+                profile=_get(t, "format_profile"),
+                width=_int(_get(t, "width")) or 0,
+                height=_int(_get(t, "height")) or 0,
+                bit_depth=_int(_get(t, "bit_depth")),
+                hdr=_detect_hdr(t),
+                # Verbose HDR string surfaced on detail page. For Dolby
+                # Vision BD remuxes this includes the profile code
+                # (dvhe.07.06) and layer structure (BL+EL+RPU).
+                hdr_format=_build_hdr_format(t),
+                frame_rate=_float(_get(t, "frame_rate")),
+                max_bit_rate=_int(_get(t, "maximum_bit_rate")),
+            )
+        elif tt == "Audio":
+            channels = _int(_get(t, "channel_s", "channels"))
+            raw_format = _get(t, "format")
+            commercial = _get(t, "commercial_name", "format_commercial_if_any")
+            bit_rate_hz = _int(_get(t, "bit_rate"))
+            audio.append(
+                AudioTrack(
+                    idx=audio_idx,
+                    codec=_norm_audio_codec(
+                        raw_format,
+                        _get(t, "format_profile"),
+                        commercial,
+                    ),
+                    channels=channels or 0,
+                    layout=_layout(channels),
+                    language=norm_lang(_get(t, "language", "other_language")),
+                    title=_get(t, "title"),
+                    is_default=_bool(_get(t, "default")),
+                    is_forced=_bool(_get(t, "forced")),
+                    format=raw_format,
+                    commercial_name=commercial,
+                    bit_rate=bit_rate_hz,
+                    bit_rate_mode=_get(t, "bit_rate_mode"),
+                    sample_rate=_int(_get(t, "sampling_rate")),
+                    bit_depth=_int(_get(t, "bit_depth")),
+                    compression_mode=_get(t, "compression_mode"),
+                ),
+            )
+            audio_idx += 1
+        elif tt == "Text":
+            title = _get(t, "title")
+            subtitle.append(
+                SubtitleTrack(
+                    idx=sub_idx,
+                    codec=_norm_sub_codec(_get(t, "format"), _get(t, "codec_id")),
+                    language=norm_lang(_get(t, "language", "other_language")),
+                    title=title,
+                    is_default=_bool(_get(t, "default")),
+                    is_forced=_bool(_get(t, "forced")),
+                    is_sdh=_is_sdh(title),
+                ),
+            )
+            sub_idx += 1
+
+    if video is not None:
+        video.bit_rate = _resolve_video_bit_rate(
+            stream=video_stream_br,
+            nominal=video_nominal_br,
+            overall=overall_bit_rate,
+            audio=audio,
+            file_size=file_size,
+            duration=duration_s,
+        )
+
+    return MediaInfoResult(
+        container=container,
+        duration=duration_s,
+        video=video,
+        audio=audio,
+        subtitle=subtitle,
+    )
+
+
+def _resolve_video_bit_rate(
+    *,
+    stream: int | None,
+    nominal: int | None,
+    overall: int | None,
+    audio: list[AudioTrack],
+    file_size: int | None,
+    duration: float | None,
+) -> int | None:
+    """MKV/TS rarely store per-stream video bit rate. Fall back the same way
+    MediaInfo's GUI does: encoder-declared nominal, then overall minus audio,
+    then derive overall from file size and duration."""
+    if stream:
+        return stream
+    if nominal:
+        return nominal
+    audio_total = sum(a.bit_rate for a in audio if a.bit_rate)
+    if overall:
+        derived = overall - audio_total
+        return derived if derived > 0 else None
+    if file_size and duration and duration > 0:
+        derived = int(file_size * 8 / duration) - audio_total
+        return derived if derived > 0 else None
+    return None
+
+
+async def extract(path: Path) -> MediaInfoResult:
+    """Parse a file via pymediainfo off the event loop."""
+    return await asyncio.to_thread(_parse_sync, path)
+
+
+# --- dict adapters for db layer -------------------------------------------
+
+
+def to_audio_row(a: AudioTrack) -> AudioTrackRow:
+    return AudioTrackRow(
+        idx=a.idx,
+        codec=a.codec,
+        channels=a.channels,
+        layout=a.layout,
+        language=a.language,
+        title=a.title,
+        is_default=a.is_default,
+        is_forced=a.is_forced,
+        format=a.format,
+        commercial_name=a.commercial_name,
+        bit_rate=a.bit_rate,
+        bit_rate_mode=a.bit_rate_mode,
+        sample_rate=a.sample_rate,
+        bit_depth=a.bit_depth,
+        compression_mode=a.compression_mode,
+    )
+
+
+def to_internal_sub_row(s: SubtitleTrack) -> SubtitleTrackRow:
+    return SubtitleTrackRow(
+        idx=s.idx,
+        source="internal",
+        file_path=None,
+        codec=s.codec,
+        language=s.language,
+        title=s.title,
+        is_default=s.is_default,
+        is_forced=s.is_forced,
+        is_sdh=s.is_sdh,
+    )

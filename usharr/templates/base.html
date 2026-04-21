@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}usharr{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="/static/icons/usharr.svg">
+<script>
+(function() {
+  var t = localStorage.getItem('theme');
+  if (t === 'light' || t === 'dark') {
+    document.documentElement.setAttribute('data-theme', t);
+  }
+})();
+</script>
+<link rel="stylesheet" href="/static/usharr.css">
+</head>
+<body>
+<nav class="topbar">
+  <div class="menu menu-left">
+    <button class="brand menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Library actions"><span class="brand-icon" aria-hidden="true"></span></button>
+    <ul class="menu-items" hidden>
+      <li><button data-trigger="/api/task/scan,/api/task/sync">Scan Library</button></li>
+      <li><button data-trigger="/api/task/refresh">Refresh Library</button></li>
+      <li><button data-trigger="/api/task/analyze" data-confirm-title="Analyzing the library will take considerable time." data-confirm="Aspect ratio detection takes approximately one minute per library item.">Analyze Library…</button></li>
+    </ul>
+  </div>
+  <ul class="tabs">
+    {% for lib in libraries %}
+      <li{% if lib.slug == current_slug %} class="active"{% endif %}>
+        <a href="/library/{{ lib.slug }}">{{ lib.label }}</a>
+      </li>
+    {% endfor %}
+  </ul>
+  <div class="spacer"></div>
+  <button id="theme-toggle" class="icon-btn" aria-label="Theme"></button>
+</nav>
+<main>
+  {% block content %}{% endblock %}
+</main>
+<dialog id="confirm-dialog">
+  <form method="dialog">
+    <h3 class="dialog-title"></h3>
+    <p class="dialog-body"></p>
+    <div class="dialog-actions">
+      <button value="cancel">Cancel</button>
+      <button value="ok" class="dialog-primary"></button>
+    </div>
+  </form>
+</dialog>
+<script>
+(function() {
+  // Publish the topbar's actual rendered height as --topbar-h. Every
+  // sticky-chain offset below (h1, thead, rail) calcs against this
+  // instead of a hardcoded pixel value that drifts with font metrics.
+  const topbar = document.querySelector('.topbar');
+  if (topbar) {
+    const setTopbarH = () => document.documentElement.style.setProperty('--topbar-h', topbar.offsetHeight + 'px');
+    setTopbarH();
+    window.addEventListener('resize', setTopbarH);
+  }
+
+  // Support multiple .menu instances on the same page — e.g. the
+  // topbar brand-as-menu and a detail-page ⋮. Opening one closes the
+  // others.
+  const menus = Array.from(document.querySelectorAll('.menu'));
+  function closeAllBut(keep) {
+    menus.forEach(m => {
+      const items = m.querySelector('.menu-items');
+      if (items && items !== keep) items.setAttribute('hidden', '');
+    });
+  }
+  menus.forEach(menu => {
+    const btn = menu.querySelector('.menu-btn');
+    const items = menu.querySelector('.menu-items');
+    if (!btn || !items) return;
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      closeAllBut(items);
+      items.toggleAttribute('hidden');
+    });
+  });
+  const confirmDialog = document.getElementById('confirm-dialog');
+  // macOS-style flash: blink the highlight twice before the menu closes
+  // so the click registers visibly. .flashing pins hover off, and .on
+  // layers the highlight back on for the bright phases.
+  function flashItem(t, after) {
+    t.classList.add('flashing', 'on');
+    setTimeout(() => t.classList.remove('on'), 60);
+    setTimeout(() => t.classList.add('on'), 120);
+    setTimeout(() => t.classList.remove('on'), 180);
+    setTimeout(() => t.classList.add('on'), 240);
+    setTimeout(() => {
+      t.classList.remove('flashing', 'on');
+      after();
+    }, 320);
+  }
+  function fireRequests(t) {
+    const urls = t.dataset.trigger.split(',').map(s => s.trim()).filter(Boolean);
+    urls.forEach(u => fetch(u, {method: 'POST'}));
+  }
+  function showConfirm(t, onOk) {
+    // Trailing ellipsis is the menu hint that this opens a dialog;
+    // strip it for the primary-button text. The title defaults to the
+    // menu label but data-confirm-title can override it (e.g. when the
+    // bold heading should be a warning instead of the action name).
+    const label = t.textContent.trim().replace(/…$/, '');
+    confirmDialog.querySelector('.dialog-title').textContent = t.dataset.confirmTitle || label;
+    confirmDialog.querySelector('.dialog-body').textContent = t.dataset.confirm;
+    confirmDialog.querySelector('.dialog-primary').textContent = label.split(' ')[0];
+    confirmDialog.returnValue = '';
+    confirmDialog.showModal();
+    confirmDialog.addEventListener('close', function onClose() {
+      confirmDialog.removeEventListener('close', onClose);
+      if (confirmDialog.returnValue === 'ok') onOk();
+    });
+  }
+  document.addEventListener('click', function(e) {
+    const t = e.target.closest('[data-trigger]');
+    if (t) {
+      e.preventDefault();
+      // Flash first so the click registers while the menu is still
+      // open. Then close the menu and either fire or hand off to the
+      // confirm dialog.
+      flashItem(t, () => {
+        const m = t.closest('.menu-items');
+        if (m) m.setAttribute('hidden', '');
+        if (t.dataset.confirm && confirmDialog) {
+          showConfirm(t, () => fireRequests(t));
+        } else {
+          fireRequests(t);
+        }
+      });
+      return;
+    }
+    if (!e.target.closest('.menu')) closeAllBut(null);
+  });
+
+  // Theme toggle: Auto → Light → Dark → Auto. Persisted in localStorage.
+  // SVG icons (Feather-style) — Unicode glyphs like ⚙ ☀ ☾ get
+  // substituted for color emoji on Apple regardless of VS15, so the
+  // icon-buttons all use inline SVG.
+  const themeBtn = document.getElementById('theme-toggle');
+  if (themeBtn) {
+    const SVG_AUTO = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>';
+    const SVG_LIGHT = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
+    const SVG_DARK = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+    const svgs = {auto: SVG_AUTO, light: SVG_LIGHT, dark: SVG_DARK};
+    const titles = {auto: 'Theme: Auto (follows system)', light: 'Theme: Light', dark: 'Theme: Dark'};
+    const next = {auto: 'light', light: 'dark', dark: 'auto'};
+    function apply(t) {
+      if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', t);
+      themeBtn.innerHTML = svgs[t];
+      themeBtn.title = titles[t];
+    }
+    apply(localStorage.getItem('theme') || 'auto');
+    themeBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const cur = localStorage.getItem('theme') || 'auto';
+      const n = next[cur];
+      localStorage.setItem('theme', n);
+      apply(n);
+    });
+  }
+})();
+</script>
+</body>
+</html>

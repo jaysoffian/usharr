@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}{{ display_title }} — usharr{% endblock %}
+
+{% macro item_grid(mf, audio, subtitle, aspect_set, duration_str) %}
+<div class="detail-grid">
+
+<section>
+<h3>Video</h3>
+<table class="kv">
+  <tr><th>Codec</th><td>{{ mf.video_codec or '—' }}</td></tr>
+  <tr><th>Profile</th><td>{{ mf.video_profile or '—' }}</td></tr>
+  {% set bucket = resolution_bucket(mf.video_width, mf.video_height) %}
+  <tr><th>Resolution</th><td>{{ (mf.video_width or '?')|string + '×' + (mf.video_height or '?')|string }}{% if bucket %} <span class="subtle">({{ bucket }})</span>{% endif %}</td></tr>
+  <tr><th>Bit depth</th><td>{{ (mf.video_bit_depth|string + ' bit') if mf.video_bit_depth else '—' }}</td></tr>
+  <tr><th>HDR</th><td>{{ mf.video_hdr or '—' }}{% if mf.video_hdr_format %}<div class="subtle">{{ mf.video_hdr_format }}</div>{% endif %}</td></tr>
+  <tr><th>Frame rate</th><td>{{ mf.video_frame_rate or '—' }}</td></tr>
+  <tr><th>Bit rate</th><td>{{ ('%.1f Mbps' % (mf.video_bit_rate / 1000000)) if mf.video_bit_rate else '—' }}{% if mf.video_max_bit_rate %} <span class="subtle">({{ '%.1f' % (mf.video_max_bit_rate / 1000000) }} max)</span>{% endif %}</td></tr>
+  <tr><th>Container</th><td>{{ mf.container or '—' }}</td></tr>
+  <tr><th>Duration</th><td>{{ duration_str }}</td></tr>
+</table>
+</section>
+
+<section>
+<h3>Aspect ratios</h3>
+{% if aspect_set %}
+<table class="ars-table">
+  <thead><tr><th>AR</th><th>% runtime</th></tr></thead>
+  <tbody>
+  {% for a in aspect_set %}
+    <tr class="{{ 'primary' if a.aspect == mf.aspect_primary else '' }}">
+      <td>{{ '%.2f' % a.aspect }}</td>
+      <td>{{ '%.0f%%' % (a.percentage * 100) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No AR data.</p>
+{% endif %}
+</section>
+
+<section>
+<h3>Audio</h3>
+{% if audio %}
+<table class="tracks">
+  <thead><tr>
+    <th>#</th><th>Lang</th><th>Title</th>
+    <th>Default</th><th>Forced</th><th>Details</th>
+  </tr></thead>
+  <tbody>
+  {% for t in audio %}
+    <tr>
+      <td>{{ t.idx }}</td>
+      <td>{{ t.lang_display }}</td>
+      <td class="wrap">{{ t.title_display }}</td>
+      <td>{{ '✓' if t.is_default else '' }}</td>
+      <td>{{ '✓' if t.is_forced else '' }}</td>
+      <td>{{ t.details }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No audio tracks.</p>
+{% endif %}
+</section>
+
+<section>
+<h3>Subtitles</h3>
+{% if subtitle %}
+<table class="tracks">
+  <thead><tr><th>#</th><th>Format</th><th>Lang</th><th>Title</th><th>Default</th><th>Forced</th><th>SDH</th><th>File</th></tr></thead>
+  <tbody>
+  {% for t in subtitle %}
+    <tr>
+      <td>{{ t.idx }}</td>
+      <td>{{ t.codec or '?' }}</td>
+      <td>{{ t.lang_display }}</td>
+      <td class="wrap">{{ t.title or '' }}</td>
+      <td>{{ '✓' if t.is_default else '' }}</td>
+      <td>{{ '✓' if t.is_forced else '' }}</td>
+      <td>{{ '✓' if t.is_sdh else '' }}</td>
+      <td class="path">{% if t.file_ext %}<code>{{ t.file_ext }}</code>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No subtitle tracks.</p>
+{% endif %}
+</section>
+
+</div>
+{% if mf.error %}
+<pre class="err">{{ mf.error }}</pre>
+{% endif %}
+{% endmacro %}
+
+{% macro nav_link(path, label) -%}
+  {% if path %}<a href="/item?path={{ path|urlencode }}">{{ label }}</a>{% else %}<span class="disabled">{{ label }}</span>{% endif %}
+{%- endmacro %}
+{% macro nav_kebab(label) -%}
+  <button class="menu-btn nav-kebab" aria-haspopup="true" aria-expanded="false" aria-label="{{ label }}"><svg viewBox="0 0 48 48" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="24" cy="12" r="3"/><circle cx="24" cy="24" r="3"/><circle cx="24" cy="36" r="3"/></svg></button>
+{%- endmacro %}
+{% block content %}
+<nav class="detail-nav">
+  {% if is_episode %}
+  <div class="menu nav-split nav-split-prev">
+    {% if prev_path %}<a class="btn" href="/item?path={{ prev_path|urlencode }}">◀ Prev</a>{% else %}<span class="btn disabled">◀ Prev</span>{% endif %}
+    {{ nav_kebab("More prev options") }}
+    <ul class="menu-items" hidden>
+      <li>{{ nav_link(prev_season_path, "◀ Previous season") }}</li>
+      <li>{{ nav_link(prev_show_path, "◀ Previous show") }}</li>
+    </ul>
+  </div>
+  <div class="menu nav-split nav-split-next">
+    {{ nav_kebab("More next options") }}
+    {% if next_path %}<a class="btn" href="/item?path={{ next_path|urlencode }}">Next ▶</a>{% else %}<span class="btn disabled">Next ▶</span>{% endif %}
+    <ul class="menu-items" hidden>
+      <li>{{ nav_link(next_season_path, "Next season ▶") }}</li>
+      <li>{{ nav_link(next_show_path, "Next show ▶") }}</li>
+    </ul>
+  </div>
+  {% else %}
+  {% if prev_path %}<a class="btn" href="/item?path={{ prev_path|urlencode }}">◀ Prev</a>{% else %}<span class="btn disabled">◀ Prev</span>{% endif %}
+  {% if next_path %}<a class="btn" href="/item?path={{ next_path|urlencode }}">Next ▶</a>{% else %}<span class="btn disabled">Next ▶</span>{% endif %}
+  {% endif %}
+  <div class="svc-group">
+    {% if plex_url %}<a class="svc svc-plex" href="{{ plex_url }}" target="_blank" rel="noopener" title="Plex"></a>{% endif %}
+    {% if tautulli_url %}<a class="svc svc-tautulli" href="{{ tautulli_url }}" target="_blank" rel="noopener" title="Tautulli"></a>{% endif %}
+    {% if bazarr_url %}<a class="svc svc-bazarr" href="{{ bazarr_url }}" target="_blank" rel="noopener" title="Bazarr"></a>{% endif %}
+    {% if radarr_url %}<a class="svc svc-radarr" href="{{ radarr_url }}" target="_blank" rel="noopener" title="Radarr"></a>{% endif %}
+    {% if sonarr_url %}<a class="svc svc-sonarr" href="{{ sonarr_url }}" target="_blank" rel="noopener" title="Sonarr"></a>{% endif %}
+  </div>
+  {% if mi_badges %}
+  <div class="mi-badges">
+    {% for b in mi_badges %}<img src="{{ b.src }}" alt="{{ b.alt }}" title="{{ b.alt }}">{% endfor %}
+  </div>
+  {% endif %}
+</nav>
+
+<header class="detail-head">
+  <div class="title-line">
+    <h1>{{ display_title }}{% if edition %} <span class="edition">{{ edition }}</span>{% endif %}{% if year %} <span class="year">({{ year }})</span>{% endif %}</h1>
+    <div class="menu menu-left">
+      <button class="menu-btn icon-btn" aria-haspopup="true" aria-expanded="false" aria-label="More actions"><svg viewBox="0 0 48 48" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="24" cy="12" r="3"/><circle cx="24" cy="24" r="3"/><circle cx="24" cy="36" r="3"/></svg></button>
+      <ul class="menu-items" hidden>
+        <li><button data-trigger="/api/task/refresh{{ mf.path|pathencode }}">Refresh</button></li>
+        <li><button data-trigger="/api/task/analyze{{ mf.path|pathencode }}">Analyze</button></li>
+      </ul>
+    </div>
+  </div>
+  <div class="path"><code>{{ mf.path }}</code></div>
+</header>
+
+{{ item_grid(mf, audio, subtitle, aspect_set, duration_str) }}
+
+{% for e in extras %}
+<hr class="extra-sep">
+<header class="extra-head">
+  <h2>{{ e.display_title }}{% if e.edition %} <span class="edition">{{ e.edition }}</span>{% endif %}{% if e.year %} <span class="year">({{ e.year }})</span>{% endif %}</h2>
+  <div class="path"><code>{{ e.mf.path }}</code></div>
+</header>
+{{ item_grid(e.mf, e.audio, e.subtitle, e.aspect_set, e.duration_str) }}
+{% endfor %}
+
+<script>
+(function() {
+  const back = {{ ('/library/' + current_slug)|tojson }};
+  const prev = {{ prev_path|tojson if prev_path else 'null' }};
+  const next = {{ next_path|tojson if next_path else 'null' }};
+  const prevSeason = {{ prev_season_path|tojson if prev_season_path else 'null' }};
+  const nextSeason = {{ next_season_path|tojson if next_season_path else 'null' }};
+  const prevShow = {{ prev_show_path|tojson if prev_show_path else 'null' }};
+  const nextShow = {{ next_show_path|tojson if next_show_path else 'null' }};
+  function go(p) {
+    if (p) window.location = '/item?path=' + encodeURIComponent(p);
+  }
+  document.addEventListener('keydown', function(e) {
+    if (e.target.closest('input,textarea')) return;
+    if (e.key === 'Escape') { window.location = back; return; }
+    // Shift = jump by season, Alt = jump by show, else = episode.
+    if (e.key === 'ArrowLeft') {
+      const t = e.altKey ? prevShow : e.shiftKey ? prevSeason : prev;
+      if (t) { e.preventDefault(); go(t); }
+    } else if (e.key === 'ArrowRight') {
+      const t = e.altKey ? nextShow : e.shiftKey ? nextSeason : next;
+      if (t) { e.preventDefault(); go(t); }
+    }
+  });
+})();
+</script>
+{% endblock %}
