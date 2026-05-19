@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks = (
             asyncio.create_task(scanner.scan_loop(config)),
             asyncio.create_task(scanner.probe_worker(config)),
-            asyncio.create_task(plex_sync.plex_sync_loop()),
+            asyncio.create_task(plex_sync.plex_sync_loop(config)),
             asyncio.create_task(bazarr_sync.bazarr_sync_loop(config)),
             asyncio.create_task(radarr_sync.radarr_sync_loop(config)),
             asyncio.create_task(sonarr_sync.sonarr_sync_loop(config)),
@@ -811,9 +811,11 @@ async def get_info_by_content_id(content_id: str) -> InfoByContentIdResponse:
             status_code=404,
             detail=f"no Media/Part for content_id={content_id}",
         )
+    config: Config = app.state.config
     db_paths = db.list_paths()
     for f in plex_files:
-        local = plex.match_local_path(f, db_paths)
+        mapped = plex.apply_path_map(f, config.plex.path_map)
+        local = plex.match_local_path(mapped, db_paths)
         if local is None:
             continue
         row = db.get(local)
@@ -860,7 +862,7 @@ async def webhook(request: Request) -> dict:
             )
         except plex.PlexError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        result = await plex_sync.handle_webhook(payload)
+        result = await plex_sync.handle_webhook(payload, app.state.config)
         local_path = result.get("local_path")
         if local_path:
             scanner.enqueue_probe(Path(local_path))
@@ -935,9 +937,7 @@ async def task_analyze_one(file_path: str) -> dict:
 
 
 _SYNC_HANDLERS = {
-    # Plex sync takes no config (uses its own module state); the others
-    # do. Wrap Plex so every handler has the same signature.
-    "plex": lambda _config: plex_sync.sync_once(),
+    "plex": plex_sync.sync_once,
     "bazarr": bazarr_sync.sync_once,
     "radarr": radarr_sync.sync_once,
     "sonarr": sonarr_sync.sync_once,

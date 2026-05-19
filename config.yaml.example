@@ -20,10 +20,14 @@ library:
 # Provides:
 #   1. Deep linking to video files in Plex Media Server
 #   2. Ability to query API by Plex ratingKey
-# Note: required by tautulli integration
+# Note: path_map is optional
 #
 # plex:
 #   url: https://plex.example.com
+#   path_map:
+#     "/media/Documentaries": /some/where/else/Documentaries
+#     "/media/Movies": /some/where/else/Movies
+#     "/media/TV Shows": /some/where/else/TV Shows
 
 ###############################################################################
 # Enable Tautulli integration (optional)

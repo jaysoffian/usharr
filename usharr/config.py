@@ -30,9 +30,13 @@ library:
 # usharr uses the URL auto-discovered during `usharr auth`, which is
 # often an ugly plex.direct subdomain. Set this to the reverse-proxy
 # URL you normally use to reach Plex — your cookies will match and
-# you won't be re-prompted to log in.
+# you won't be re-prompted to log in. path_map (optional) works the
+# same as on the *arr integrations: a local→remote prefix map applied
+# to Plex-reported paths before suffix matching kicks in.
 # plex:
 #   url: https://plex.home.example.com
+#   path_map:
+#     "/media/Movies": /some/where/else/Movies
 
 # Optional: Tautulli base URL for per-item deep-links.
 # tautulli:
@@ -72,6 +76,9 @@ class PlexConfig:
     # (auto-discovered) URL so they can reach the server locally even
     # when the UI URL points through a reverse proxy.
     url: str | None = None
+    # {local_prefix: remote_prefix} — rewrite Plex-reported paths so
+    # they match usharr's mounts before suffix matching runs.
+    path_map: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -134,6 +141,7 @@ def load_config(path: Path | None = None) -> Config:
         library={str(k): list(v or []) for k, v in library_raw.items()},
         plex=PlexConfig(
             url=plex_raw.get("url") or None,
+            path_map=dict(plex_raw.get("path_map") or {}),
         ),
         tautulli=TautulliConfig(
             url=tautulli_raw.get("url") or None,

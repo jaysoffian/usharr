@@ -15,7 +15,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from usharr import db, plex
-from usharr.config import INTERVAL_SECONDS
+from usharr.config import INTERVAL_SECONDS, Config
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +84,12 @@ def _pick_file(item: _LibMetadata) -> str | None:
     return next((p.file for m in item.media for p in m.parts if p.file), None)
 
 
-def _upsert(item: _LibMetadata, db_paths: set[str]) -> str | None:
+def _upsert(
+    item: _LibMetadata, db_paths: set[str], path_map: dict[str, str]
+) -> str | None:
     plex_file = _pick_file(item)
-    local_path = plex.match_local_path(plex_file, db_paths) if plex_file else None
+    mapped = plex.apply_path_map(plex_file, path_map) if plex_file else None
+    local_path = plex.match_local_path(mapped, db_paths) if mapped else None
     db.upsert_plex_item(
         rating_key=item.rating_key,
         item_type=item.type or "movie",
@@ -102,7 +105,7 @@ def _upsert(item: _LibMetadata, db_paths: set[str]) -> str | None:
     return local_path
 
 
-async def sync_once() -> dict:
+async def sync_once(config: Config) -> dict:
     """Walk sections and upsert every movie + episode into plex_item."""
     try:
         _, server_url, _ = plex.load_auth()
@@ -136,7 +139,7 @@ async def sync_once() -> dict:
             if not item.rating_key:
                 continue
             seen.add(item.rating_key)
-            _upsert(item, db_paths)
+            _upsert(item, db_paths, config.plex.path_map)
             upserted += 1
 
     existing = db.list_plex_rating_keys()
@@ -146,10 +149,10 @@ async def sync_once() -> dict:
     return {"upserted": upserted, "removed": removed}
 
 
-async def plex_sync_loop() -> None:
+async def plex_sync_loop(config: Config) -> None:
     while True:
         try:
-            await sync_once()
+            await sync_once(config)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -183,7 +186,7 @@ def parse_webhook_payload(raw: str | bytes) -> dict[str, Any]:
     return data
 
 
-async def handle_webhook(payload: dict[str, Any]) -> dict:
+async def handle_webhook(payload: dict[str, Any], config: Config) -> dict:
     event = str(payload.get("event") or "")
     metadata = payload.get("Metadata") or {}
     rating_key = str(metadata.get("ratingKey") or "")
@@ -212,7 +215,7 @@ async def handle_webhook(payload: dict[str, Any]) -> dict:
             **item.model_dump(by_alias=True) | {"ratingKey": rating_key}
         )
 
-    local_path = _upsert(item, db.list_paths())
+    local_path = _upsert(item, db.list_paths(), config.plex.path_map)
     return {
         "event": event,
         "action": "upserted",

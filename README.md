@@ -14,6 +14,22 @@ Copy [`config.yaml.example`](./config.yaml.example) to `config.yaml` and edit.
 
 Paths are scanned recursively for files with a video extension (`.avi`, `.iso`, `.m2ts`, `.m4v`, `.mkv`, `.mov`, `.mp4`, `.ts`, `.webm`). A full scan runs at startup and once an hour thereafter. Files whose size + mtime haven't changed are skipped; `mediainfo` and `ffmpeg cropdetect` are re-run only when needed.
 
+### Integrations and Path Matching
+
+The configuration file allows for integrations with Plex, Bazarr, Radarr, Sonarr, and Tautulli. All of these except for Tautulli require Usharr to match paths reported to it by the integrations against the paths in its own DB. It does this through a combination of suffix matching and iteratively stripping path components until it finds a single match.
+
+For example, say that Plex reports a path as `/media/Movies/Brazil (1985)/Brazil (1985).mkv`. Usharr will look for a single path in its own DB that ends with `/media/Movies/Brazil (1985)/Brazil (1985).mkv`. If it does not find any matches, it will then look for a single path in its DB that ends with `/Movies/Brazil (1985)/Brazil (1985).mkv`. It will continue doing this until there is a single match or it runs out of path components, in which case the item will remain unmatched. An item will also remain unmatched if multiple paths match.
+
+This works well as long as items are uniquely named and/or if you expose your media library to Usharr using the same paths (mount points) as the integrations. If not, you may also configure each integration with a "path map" to help with matching:
+
+```yaml
+plex:
+  url: https://plex.example.com
+  path_map:
+    "/media/Movies": "/mnt/Movies"
+```
+
+This would allow Usharr to more reliably match `/media/Movies/Brazil (1985)/Brazil (1985).mkv` (as exposed to Usharr) to `/mnt/Movies/Brazil (1985)/Brazil (1985).mkv` (as exposed to Plex).
 
 ## Web UI
 
