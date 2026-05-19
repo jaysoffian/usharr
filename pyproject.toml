@@ -10,6 +10,7 @@ dependencies = [
     "language-data>=1.3",
     "pydantic>=2",
     "pymediainfo>=6",
+    "python-multipart",
     "ruamel-yaml>=0.19.1",
     "uvicorn[standard]",
 ]
