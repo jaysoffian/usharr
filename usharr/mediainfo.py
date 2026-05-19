@@ -220,21 +220,19 @@ def _norm_sub_codec(fmt: str | None, codec_id: str | None) -> str:
 def _build_hdr_format(track: object) -> str | None:
     """Compose the fullest HDR description available.
 
-    pymediainfo exposes HDR metadata across several fields:
-      - hdr_format / hdr_format_string: the text summary
-      - hdr_format_version: e.g. "1.0"
-      - hdr_format_profile: e.g. "dvhe.07.06"
-      - hdr_format_settings: e.g. "BL+EL+RPU" (the layer structure)
-      - hdr_format_compatibility: e.g. "HDR10 compatible"
-    Some builds populate only `hdr_format` with everything concatenated;
-    others split across these fields, using `" / "` as a per-stream
-    separator (e.g. "dvhe.07 / " for Profile 7, where the enhancement
-    stream has no value of its own). Strip those empties and join in
-    MediaInfo's canonical comma-separated form.
+    pymediainfo mirrors MediaInfo's `HDR_Format/String` (the pre-assembled
+    human-readable line — `"Dolby Vision, Version 1.0, Profile 8.1,
+    dvhe.08.06, BL+RPU, no metadata compression, HDR10 compatible / SMPTE
+    ST 2094 App 4, Version HDR10+ Profile B, HDR10+ Profile B compatible"`)
+    as `other_hdr_format`, a list. Prefer that; fall back to assembling
+    the raw sub-fields (`hdr_format`, `_version`, `_profile`, `_settings`,
+    `_compatibility`) when it's missing. The raw fields use `" / "` as a
+    per-HDR-system separator with empty slots when one system lacks a
+    value; `_clean_slashes` drops those.
     """
-    full = _get(track, "hdr_format_string")
-    if full:
-        return _clean_slashes(full)
+    other = getattr(track, "other_hdr_format", None)
+    if isinstance(other, list) and other:
+        return str(other[0])
     base = _get(track, "hdr_format")
     if not base:
         return None
