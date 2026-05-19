@@ -10,29 +10,51 @@ Usharr operates solely offline, extracting the information already in your video
 
 ## Configuration
 
-Copy `config.yaml.example` to `config.yaml` and edit.
+Copy [`config.yaml.example`](./config.yaml.example) to `config.yaml` and edit.
 
-Only `library` is required. Each entry maps a category name (shown in the top nav) to one or more paths.
+Paths are scanned recursively for files with a video extension (`.avi`, `.iso`, `.m2ts`, `.m4v`, `.mkv`, `.mov`, `.mp4`, `.ts`, `.webm`). A full scan runs at startup and once an hour thereafter. Files whose size + mtime haven't changed are skipped; `mediainfo` and `ffmpeg cropdetect` are re-run only when needed.
 
-Paths are walked recursively for files with a video extension (`.avi`, `.iso`, `.m4v`, `.mkv`, `.mov`, `.mp4`). A full scan runs at startup and once an hour thereafter. Files whose size + mtime haven't changed are skipped; `mediainfo` and `ffmpeg cropdetect` are re-run only when needed.
 
 ## Web UI
 
-Listens on port `8555`. `/` redirects to the first configured library.
+### Application menu
 
-- **Library pages** at `/library/{slug}` — one per entry in `library`. Slug is derived from the category name (`Series` → `series`). Columns: Title, Year, S/E (TV only), AR, Video, Audio, Subs, Links. Title gets an edition badge when the filename carries the Plex/Jellyfin `{edition-NAME}` tag; year falls back to a parsed `(YYYY)` when Plex has no entry. Rows whose last probe errored are highlighted red. Files living under a Plex-style extras subfolder (`Extras`, `Interviews`, `Featurettes`, `Deleted Scenes`, `Trailers`, …) are hidden from the list — they show up stacked under the parent movie on its detail page.
+-  **Scan Library**: Scan for added/removed files and synchronize with Plex and *arr integrations. Run mediainfo and AR analysis on new files.
+-  **Refresh Library**: Re-run `mediainfo` on every file.
+-  **Analyze Library…**: Re-run `mediainfo` and perform fresh AR analysis on every file.
 
-- **Detail pages** at `/item?path=...` — modelled on TMM's Media files pane, laid out as a 2×2 grid (Video · Aspect ratios / Audio · Subtitles). Audio rows carry one-line `Codec / layout / kHz / kbps / depth` details; subtitles distinguish internal vs sidecar and surface the sidecar file path. Prev / Next buttons (plus `←`, `→`, `Esc` keys) hop between main titles in the current library, skipping extras.
+### Library pages
 
-- **Deep-link buttons** in library rows and the detail header: Plex (uses `plex.url` so your existing session cookies apply), Tautulli (`info?rating_key=`), Bazarr (`/movies/{radarrId}` or `/episodes/{sonarrSeriesId}`), Radarr (`/movie/{tmdbId}`), Sonarr (`/series/{titleSlug}`). Detail page also exposes per-title **Reread** (force mediainfo) and **Redetect** (force mediainfo + ardetector) buttons.
+One page per entry in `library` with a table on each page with one row per media item and the following columns: Title, Year, AR, Video, Audio, Eng Subs, Linksa
 
-- **Top-bar ⚙ menu** — fire-and-forget POSTs (stays on the page with a brief ✓): **Scan** (incremental), **Force reread** (re-run mediainfo on every file, keep cached AR), **Force redetect** (re-run everything including ardetector — slow), plus Plex sync / Bazarr sync and a theme toggle cycling Auto / Light / Dark (sticky in `localStorage`; follows the OS by default).
+Title gets an edition badge when the filename carries the Plex/Jellyfin `{edition-NAME}` tag; year falls back to a parsed `(YYYY)` when Plex has no entry.
+
+Rows whose last probe errored are highlighted red.
+
+TV libraries roll episodes up under show + season header rows — click a show header to toggle all of its seasons, click a season header for just that one, or click the table header to flip the whole library.
+
+Files living under a Plex-style extras subfolder (`Extras`, `Interviews`, `Featurettes`, `Deleted Scenes`, `Trailers`, …) are hidden in the table but show up under their parent media item's detail page.
+
+### Detail pages
+
+The detail pages contain sections for video, audio, subtitles and aspect ratio.
+
+- Video: codec, profile, resolution, bit depth, HDR, frame rate, bit rate, container, duration.
+- Audio: track #, language, title, default, forced, technical details
+- Subtitles: subtitle #, format, language, title, default, forced, SDH, filename extension.
+- Aspect ratio: AR and runtime percentage.
+
+### Integration buttons
+
+There are buttons on all pages which link directly to the media item in any configured integrations: Plex, Tautulli, Radarr or Sonarr and Bazarr. This allows you to quickly jump from Usharr to one of the integrations to get additional details not already presented by Usharr.
+
 
 ## HTTP API
 
-Data endpoints for automation. Everything under `/api/` returns JSON; `/health` stays at the root for monitoring.
+- `/api/` JSON API, documented at `/docs` (Swagger UI) and `/redoc` (ReDoc)
+- `/health` for monitoring
 
-Live API reference at `/docs` (Swagger UI) and `/redoc` (ReDoc), auto-generated by FastAPI. The raw OpenAPI schema is at `/openapi.json`.
+Example queries:
 
 ```bash
 # Look up by local path (the path as usharr sees it in its own mounts).
@@ -84,14 +106,9 @@ Example response:
 }
 ```
 
-`aspect.primary` is the AR the film spends the most time in; `aspect.widest` is the widest AR present (relevant for IMAX/variable-AR films). `aspect.samples` lists every detected AR with its fraction of runtime. Fields with no data (e.g. `hdr` on an SDR file) are `null`; optional audio/subtitle fields are elided from the above example for brevity — see `/docs` for the full schema.
+### Triggers
 
-### Operational triggers
-
-All task endpoints have a library-wide form and an optional single-file
-form (`/task/<verb>/<path>`). `scan` is incremental (skips fresh files);
-`refresh` re-extracts mediainfo; `analyze` re-runs both mediainfo and
-ardetector.
+The web UI calls various task APIs:
 
 ```bash
 # Incremental scan — picks up new files, re-probes changed ones.
@@ -110,7 +127,7 @@ curl -X POST 'http://usharr:8555/api/task/scan/media/Movies/Dune%202021.mkv'
 curl -X POST 'http://usharr:8555/api/task/refresh/media/Movies/Dune%202021.mkv'
 curl -X POST 'http://usharr:8555/api/task/analyze/media/Movies/Dune%202021.mkv'
 
-# Re-pull metadata-provider libraries (all, or individually).
+# Trigger sync with integrations all or individually:
 curl -X POST http://usharr:8555/api/task/sync
 curl -X POST http://usharr:8555/api/task/sync/plex
 curl -X POST http://usharr:8555/api/task/sync/bazarr
@@ -120,13 +137,11 @@ curl -X POST http://usharr:8555/api/task/sync/sonarr
 
 ### Webhooks
 
-Point Plex Server → Settings → Webhooks at `http://usharr:8555/api/webhook`. On `library.new` / `library.update` / `library.on.deck` usharr refreshes the referenced `plex_item` and enqueues a probe on the resolved local path. No auth on the endpoint; rely on LAN isolation.
-
-The same endpoint will dispatch Sonarr/Radarr webhooks once those handlers are wired — it sniffs the incoming payload shape.
+Point Plex Server → Settings → Webhooks at `http://usharr:8555/api/webhook`. On `library.new` / `library.update` / `library.on.deck`, Usharr refreshes the referenced `plex_item` and enqueues a probe on the resolved local path.
 
 ## Plex
 
-Plex integration is optional. It lets clients ask `/api/info/by-content-id/{id}` (Plex's `ratingKey`, surfaced as `media_content_id` by Home Assistant's Plex component) instead of having to know the on-disk path. usharr uses Plex's PIN OAuth flow, so you don't paste a token anywhere:
+Plex integration allows clients to query `/api/info/by-content-id/{id}` where `{id}` is Plex's `ratingKey`. Usharr must first be authenticated to Plex:
 
 ```bash
 # From inside the container (or anywhere the DB is writable):
@@ -138,11 +153,11 @@ usharr auth --status   # show the link state
 usharr auth --reset    # forget the stored token
 ```
 
-Plex-reported paths don't have to match usharr's mounts — usharr matches by longest path suffix against the files it has already scanned. Filenames are typically distinctive enough that this is unambiguous. If it isn't, `/api/info/by-content-id/{id}` returns 404.
+Usharr matches media files against Plex's reported paths by longest path suffix.
 
 ## CLI
 
-The same image exposes a small CLI for ad-hoc use:
+The container image exposes a CLI:
 
 ```bash
 usharr probe /media/Movies/Dune\ 2021.mkv   # probe one file; print JSON; no DB writes
@@ -154,11 +169,11 @@ usharr auth                                  # link to Plex (see above)
 ## Podman
 
 ```bash
-# Build and export OCI image to `usharr.tar`:
-make image
+# Build the image:
+make build
 
-# Build and run locally (edit MEDIA_* in the Makefile first):
-make run
+# Build + export an OCI tarball to `usharr.tar` (for `docker load` on a remote host):
+make image
 ```
 
 The `/config` volume expects a directory containing `config.yaml`; `usharr.db` is created alongside it. Media tree mounts should be read-only.
@@ -189,13 +204,122 @@ services:
         target: /tmp
 ```
 
+## Home Assistant
+
+Sample automation:
+
+```yaml
+###
+### configuration.yaml
+###
+rest_command:
+  usharr_info_by_content_id:
+    url: "https://usharr.example.com/api/info/by-content-id/{{ content_id }}"
+    method: GET
+    timeout: 10
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+
+###
+### scripts.yaml
+###
+set_theater_curtains_for_aspect:
+  alias: Set Theater Curtains for Aspect
+  fields:
+    aspect:
+      description: Aspect ratio as a float (e.g. 2.39). Linearly mapped 1.33 -> 0, 2.40 -> 100, clamped.
+      example: 2.39
+      required: true
+  variables:
+    ar: '{{ aspect | float(0) }}'
+    raw: '{{ ((ar - 1.33) / 1.07 * 100) | round | int }}'
+    position: '{{ 0 if raw < 0 else (100 if raw > 100 else raw) }}'
+  sequence:
+    - action: cover.set_cover_position
+      target:
+        entity_id: cover.theater_curtains
+      data:
+
+        position: '{{ position | int }}'
+###
+### automations.yaml
+###
+- id: '1234567890'
+  alias: Theater Curtains Match Plex
+  description: ''
+  triggers:
+  - trigger: state
+    entity_id:
+    - media_player.theater_plex_kodi
+    - media_player.theater_plex_infuse
+    to: playing
+    not_from: paused
+  - trigger: state
+    entity_id: input_boolean.theater_curtains_match_plex
+    to: 'on'
+  actions:
+  - if:
+    - condition: template
+      value_template: '{{ trigger.entity_id == ''input_boolean.theater_curtains_match_plex''
+        }}'
+    then:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.theater_curtains_match_plex
+    - variables:
+        player: "{{ ['media_player.theater_plex_infuse',\n    'media_player.theater_plex_kodi']\n
+          \  | select('is_state', 'playing') | list | first | default('') }}"
+    - condition: template
+      value_template: '{{ player != "" }}'
+    - variables:
+        content_id: '{{ state_attr(player, "media_content_id") }}'
+    else:
+    - variables:
+        player: '{{ trigger.entity_id }}'
+        content_id: '{{ trigger.to_state.attributes.media_content_id }}'
+    - delay:
+        hours: 0
+        minutes: 0
+        seconds: 3
+        milliseconds: 0
+    - condition: template
+      value_template: "{{ states(player) == 'playing'\n   and state_attr(player, 'media_content_id')
+        == content_id }}"
+  - condition: template
+    value_template: '{{ content_id is not none }}'
+  - action: rest_command.usharr_info_by_content_id
+    data:
+      content_id: '{{ content_id }}'
+    response_variable: usharr
+  - condition: template
+    value_template: '{{ usharr.status == 200 }}'
+  - variables:
+      ar: '{{ usharr["content"]["aspect"]["widest"] | float(0) }}'
+  - action: lumagen.show_osd_message
+    data:
+      entity_id: remote.theater_lumagen
+      line_one: Aspect {{ "%.2f" | format(ar) }}
+      duration: 1
+  - action: script.set_theater_curtains_for_aspect
+    data:
+      aspect: '{{ ar }}'
+  mode: single
+
+```
+
+This automation looks up the aspect ratio of what's currently playing (as reported by the [Plex Media Server HA integration](https://www.home-assistant.io/integrations/plex/)) and then adjusts my theater screen curtains to match. It simultaneously displays the AR using my [Lumagen Radiance Pro HA integration(https://github.com/jaysoffian/ha-lumagen).
+
+The automation triggers either when one of my media players (Infuse on Apple TV or Kodi on Ugoos AM6B+) starts playing, or when I manually trigger it using the `theater_curtains_match_plex` input boolean (which is exposed to HomeKit via [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/) so I can activate it via Siri).
+
 ## Development
 
 Requires [mise-en-place](https://mise.jdx.dev) and [Podman](https://podman.io).
 
 ```bash
-make setup
-make check
+mise install              # install pinned tools (uv, prek)
+make serve                # uvicorn against a read-only copy of usharr.db
+mise x -- prek -a         # run all pre-commit checks
 ```
 
 ## License
