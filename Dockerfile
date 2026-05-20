@@ -2,6 +2,7 @@ FROM alpine:edge AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    UV_NO_BINARY_PACKAGE=pymediainfo \
     UV_PYTHON_INSTALL_DIR=/usr/local/share/uv-python \
     UV_PYTHON_BIN_DIR=/usr/local/bin
 WORKDIR /app
