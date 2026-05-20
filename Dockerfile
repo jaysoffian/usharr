@@ -15,7 +15,7 @@ RUN if [ -f uv.lock ]; then \
     fi
 
 FROM alpine:edge
-RUN apk add --no-cache ffmpeg libmediainfo
+RUN apk add --no-cache ffmpeg libmediainfo dovi-tool
 WORKDIR /app
 COPY --from=builder /usr/local /usr/local
 COPY --from=builder /app/.venv /app/.venv

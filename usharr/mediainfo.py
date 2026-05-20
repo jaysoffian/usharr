@@ -1,8 +1,11 @@
 """Container/codec/track extraction via pymediainfo."""
 
 import asyncio
+import json
 import logging
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -270,6 +273,52 @@ def _dv_profile_num(track: object) -> int | None:
     return int(m.group(1)) if m else None
 
 
+_DOVI_TOOL_TIMEOUT = 30
+
+
+def _dv_el_type(path: Path) -> str | None:
+    """Return profile-7 enhancement layer type ("MEL" or "FEL").
+
+    MediaInfoLib doesn't expose this yet (PR #2447 pending). Extract one
+    frame's RPU with dovi_tool and read `el_type` from `dovi_tool info`.
+    Returns None if dovi_tool is missing or the call fails.
+    """
+    with tempfile.NamedTemporaryFile(prefix="RPU", suffix=".bin") as tmp:
+        try:
+            subprocess.run(
+                ["dovi_tool", "extract-rpu", path, "-l", "1", "-o", tmp.name],
+                check=True,
+                capture_output=True,
+                timeout=_DOVI_TOOL_TIMEOUT,
+            )
+            info = subprocess.run(
+                ["dovi_tool", "info", "-i", tmp.name, "-f", "0"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_DOVI_TOOL_TIMEOUT,
+            )
+        except (
+            FileNotFoundError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as e:
+            logger.debug("dovi_tool failed for %s: %s", path, e)
+            return None
+        # `info` prints a "Parsing RPU file..." preamble before the JSON.
+        brace = info.stdout.find("{")
+        if brace < 0:
+            logger.warning("dovi_tool info: no JSON in output for %s", path)
+            return None
+        try:
+            data = json.loads(info.stdout[brace:])
+        except json.JSONDecodeError as e:
+            logger.warning("dovi_tool info: JSON parse failed for %s: %s", path, e)
+            return None
+        el = data.get("el_type")
+        return el if el in ("MEL", "FEL") else None
+
+
 def _detect_hdr(track: object) -> str | None:
     hdr_fmt = (_get(track, "hdr_format", "hdr_format_commercial") or "").lower()
     xfer = (_get(track, "transfer_characteristics") or "").lower()
@@ -379,6 +428,17 @@ def _parse_sync(path: Path) -> MediaInfoResult:
                 frame_rate=_float(_get(t, "frame_rate")),
                 max_bit_rate=_int(_get(t, "maximum_bit_rate")),
             )
+            if (
+                _dv_profile_num(t) == 7
+                and video.hdr_format
+                and "BL+EL+RPU" in video.hdr_format
+            ):
+                el = _dv_el_type(path)
+                if el:
+                    video.hdr_format = video.hdr_format.replace(
+                        "BL+EL+RPU",
+                        f"BL+{el}+RPU",
+                    )
         elif tt == "Audio":
             channels = _int(_get(t, "channel_s", "channels"))
             raw_format = _get(t, "format")
