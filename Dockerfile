@@ -15,8 +15,16 @@ RUN if [ -f uv.lock ]; then \
         uv sync --no-dev --no-install-project; \
     fi
 
+FROM jlesage/mediainfo:v26.05.1 AS mediainfo
+RUN mkdir -p /out/usr/bin /out/usr/lib \
+    && cp -a /usr/bin/mediainfo /out/usr/bin/ \
+    && cp -a /usr/lib/libmediainfo.so* /out/usr/lib/ \
+    && cp -a /usr/lib/libzen.so* /out/usr/lib/ \
+    && cp -a /usr/lib/libtinyxml2.so* /out/usr/lib/
+
 FROM alpine:edge
-RUN apk add --no-cache ffmpeg libmediainfo dovi-tool
+RUN apk add --no-cache ffmpeg dovi-tool
+COPY --from=mediainfo /out/ /
 WORKDIR /app
 COPY --from=builder /usr/local /usr/local
 COPY --from=builder /app/.venv /app/.venv
