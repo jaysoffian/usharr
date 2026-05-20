@@ -33,11 +33,11 @@ _SERIES_ADAPTER: TypeAdapter[list[_Series]] = TypeAdapter(list[_Series])
 
 
 async def _get_series(base: str, api_key: str) -> list[_Series]:
-    url = f"{base.rstrip('/')}/api/v3/series?apikey={api_key}"
+    url = f"{base.rstrip('/')}/api/v3/series"
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         r = await client.get(url, headers={"X-Api-Key": api_key})
     if r.status_code != 200:
-        msg = f"GET {url.replace(api_key, '***')} → {r.status_code}"
+        msg = f"GET {url} → {r.status_code}"
         raise RuntimeError(msg)
     try:
         return _SERIES_ADAPTER.validate_json(r.content)

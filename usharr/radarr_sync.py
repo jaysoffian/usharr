@@ -38,11 +38,11 @@ _MOVIES_ADAPTER: TypeAdapter[list[_Movie]] = TypeAdapter(list[_Movie])
 
 
 async def _get_movies(base: str, api_key: str) -> list[_Movie]:
-    url = f"{base.rstrip('/')}/api/v3/movie?apikey={api_key}"
+    url = f"{base.rstrip('/')}/api/v3/movie"
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         r = await client.get(url, headers={"X-Api-Key": api_key})
     if r.status_code != 200:
-        msg = f"GET {url.replace(api_key, '***')} → {r.status_code}"
+        msg = f"GET {url} → {r.status_code}"
         raise RuntimeError(msg)
     try:
         return _MOVIES_ADAPTER.validate_json(r.content)
