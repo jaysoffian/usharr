@@ -11,7 +11,7 @@ import time
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from usharr import db, plex
+from usharr import db
 from usharr.config import INTERVAL_SECONDS, Config
 
 logger = logging.getLogger(__name__)
@@ -63,22 +63,19 @@ async def sync_once(config: Config) -> dict:
         logger.warning("radarr_sync: fetch failed: %s", exc)
         return {"error": str(exc)}
 
-    file_paths = db.list_paths()
     now = int(time.time())
 
     seen: set[int] = set()
     for m in movies:
         seen.add(m.id)
         file_path = m.movie_file.path if m.movie_file else None
-        mapped = plex.apply_path_map(file_path, r.path_map) if file_path else None
-        local = plex.match_local_path(mapped, file_paths) if mapped else None
         db.upsert_radarr_movie(
             movie_id=m.id,
             tmdb_id=m.tmdb_id,
             title=m.title or None,
             year=m.year,
-            path=file_path or None,
-            local_path=local,
+            remote_path=file_path or None,
+            path_map=r.path_map,
             updated_at=now,
         )
 

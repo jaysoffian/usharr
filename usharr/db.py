@@ -105,6 +105,11 @@ CREATE TABLE IF NOT EXISTS subtitle_track (
     PRIMARY KEY (path, idx)
 ) WITHOUT ROWID;
 
+CREATE TABLE IF NOT EXISTS kv (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS plex_item (
     rating_key     TEXT PRIMARY KEY,
     type           TEXT NOT NULL,
@@ -113,7 +118,6 @@ CREATE TABLE IF NOT EXISTS plex_item (
     show_title     TEXT,
     season_number  INTEGER,
     episode_number INTEGER,
-    plex_path      TEXT,
     local_path     TEXT,
     updated_at     INTEGER NOT NULL
 ) WITHOUT ROWID;
@@ -122,16 +126,14 @@ CREATE TABLE IF NOT EXISTS bazarr_movie (
     radarr_id    INTEGER PRIMARY KEY,
     title        TEXT,
     year         INTEGER,
-    path         TEXT,           -- as Bazarr reports it (the file path)
-    local_path   TEXT,           -- resolved to a media_file.path via suffix match
+    local_path   TEXT,             -- remote movie file path mapped via path_map
     updated_at   INTEGER NOT NULL
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS bazarr_series (
     sonarr_id    INTEGER PRIMARY KEY,
     title        TEXT,
-    path         TEXT,           -- Bazarr's show-folder path
-    local_folder TEXT,           -- resolved local show folder
+    local_folder TEXT,             -- remote show folder mapped via path_map
     updated_at   INTEGER NOT NULL
 ) WITHOUT ROWID;
 
@@ -140,8 +142,7 @@ CREATE TABLE IF NOT EXISTS radarr_movie (
     tmdb_id    INTEGER,               -- for /movie/{tmdbId} deep-links
     title      TEXT,
     year       INTEGER,
-    path       TEXT,                  -- movieFile.path (the .mkv)
-    local_path TEXT,                  -- resolved via suffix match
+    local_path TEXT,                  -- remote movie file path mapped via path_map
     updated_at INTEGER NOT NULL
 ) WITHOUT ROWID;
 
@@ -150,14 +151,8 @@ CREATE TABLE IF NOT EXISTS sonarr_series (
     tvdb_id      INTEGER,
     title_slug   TEXT,                -- for /series/{slug} deep-links
     title        TEXT,
-    path         TEXT,                -- Sonarr's series-folder path
-    local_folder TEXT,                -- resolved local series folder
+    local_folder TEXT,                -- remote series folder mapped via path_map
     updated_at   INTEGER NOT NULL
-) WITHOUT ROWID;
-
-CREATE TABLE IF NOT EXISTS kv (
-    key   TEXT PRIMARY KEY,
-    value TEXT
 ) WITHOUT ROWID;
 """
 
@@ -259,7 +254,6 @@ class PlexItemRow:
     show_title: str | None
     season_number: int | None
     episode_number: int | None
-    plex_path: str | None
     local_path: str | None
     updated_at: int
 
@@ -294,8 +288,6 @@ class LibraryRow:
     aspect_widest: float | None
     aspect_samples: str | None
     # plex_item fields aliased with a plex_ prefix; nullable via LEFT JOIN.
-    # Note `plex_plex_path` is the doubled prefix on the plex_item.plex_path
-    # column — by-design from the alias scheme in library_rows().
     plex_rating_key: str | None
     plex_type: str | None
     plex_title: str | None
@@ -303,7 +295,6 @@ class LibraryRow:
     plex_show_title: str | None
     plex_season_number: int | None
     plex_episode_number: int | None
-    plex_plex_path: str | None
     plex_updated_at: int | None
 
 
@@ -391,6 +382,65 @@ def _conn() -> sqlite3.Connection:
     return _db
 
 
+# --- path mapping ---------------------------------------------------------
+
+
+def _map_remote_path(remote: str, path_map: dict[str, str]) -> str:
+    """Rewrite a remote path to local using a {local: remote} prefix map.
+
+    Returns the input unchanged when no prefix matches — fine for setups
+    where the container sees the same tree under the same paths as the
+    remote service (identical mounts).
+    """
+    for local, r in path_map.items():
+        r2 = r.rstrip("/")
+        if remote == r2 or remote.startswith(r2 + "/"):
+            return local.rstrip("/") + remote[len(r2) :]
+    return remote
+
+
+def _file_exists(p: str) -> bool:
+    return (
+        _conn()
+        .execute("SELECT 1 FROM media_file WHERE path = ? LIMIT 1", (p,))
+        .fetchone()
+        is not None
+    )
+
+
+def _folder_has_files(p: str) -> bool:
+    like = _like_prefix(p.rstrip("/") + "/")
+    return (
+        _conn()
+        .execute(
+            "SELECT 1 FROM media_file WHERE path LIKE ? ESCAPE '\\' LIMIT 1",
+            (like,),
+        )
+        .fetchone()
+        is not None
+    )
+
+
+def _resolve_local_file(
+    remote_path: str | None, path_map: dict[str, str]
+) -> str | None:
+    """Map a remote file path to local; None if it doesn't match a media_file row."""
+    if not remote_path:
+        return None
+    mapped = _map_remote_path(remote_path, path_map)
+    return mapped if _file_exists(mapped) else None
+
+
+def _resolve_local_folder(
+    remote_path: str | None, path_map: dict[str, str]
+) -> str | None:
+    """Map a remote folder path to local; None if no media_file row sits under it."""
+    if not remote_path:
+        return None
+    mapped = _map_remote_path(remote_path, path_map)
+    return mapped if _folder_has_files(mapped) else None
+
+
 # --- media_file -----------------------------------------------------------
 
 _MEDIA_COLS = (
@@ -412,6 +462,11 @@ def get(path: str) -> MediaFileRow | None:
     if row is None:
         return None
     return _row(MediaFileRow, _MEDIA_COLS, row)
+
+
+def get_by_remote_path(remote: str, path_map: dict[str, str]) -> MediaFileRow | None:
+    """Map a remote path to local and return the matching media_file row."""
+    return get(_map_remote_path(remote, path_map))
 
 
 def insert_media_file(
@@ -908,7 +963,6 @@ _PLEX_ITEM_COLS = (
     "show_title",
     "season_number",
     "episode_number",
-    "plex_path",
     "local_path",
     "updated_at",
 )
@@ -919,14 +973,16 @@ def upsert_plex_item(
     rating_key: str,
     item_type: str,
     updated_at: int,
+    path_map: dict[str, str],
     title: str | None = None,
     year: int | None = None,
     show_title: str | None = None,
     season_number: int | None = None,
     episode_number: int | None = None,
-    plex_path: str | None = None,
-    local_path: str | None = None,
-) -> None:
+    remote_path: str | None = None,
+) -> str | None:
+    """Upsert a plex_item. Returns the resolved local_path (or None)."""
+    local_path = _resolve_local_file(remote_path, path_map)
     cols = ", ".join(_PLEX_ITEM_COLS)
     placeholders = ", ".join("?" * len(_PLEX_ITEM_COLS))
     _conn().execute(
@@ -939,11 +995,11 @@ def upsert_plex_item(
             show_title,
             season_number,
             episode_number,
-            plex_path,
             local_path,
             updated_at,
         ),
     )
+    return local_path
 
 
 def get_plex_item_by_local_path(local_path: str) -> PlexItemRow | None:
@@ -1003,16 +1059,17 @@ def upsert_bazarr_movie(
     *,
     radarr_id: int,
     updated_at: int,
+    path_map: dict[str, str],
     title: str | None = None,
     year: int | None = None,
-    path: str | None = None,
-    local_path: str | None = None,
+    remote_path: str | None = None,
 ) -> None:
+    local_path = _resolve_local_file(remote_path, path_map)
     _conn().execute(
         "INSERT OR REPLACE INTO bazarr_movie"
-        " (radarr_id, title, year, path, local_path, updated_at)"
-        " VALUES (?,?,?,?,?,?)",
-        (radarr_id, title, year, path, local_path, updated_at),
+        " (radarr_id, title, year, local_path, updated_at)"
+        " VALUES (?,?,?,?,?)",
+        (radarr_id, title, year, local_path, updated_at),
     )
 
 
@@ -1020,15 +1077,16 @@ def upsert_bazarr_series(
     *,
     sonarr_id: int,
     updated_at: int,
+    path_map: dict[str, str],
     title: str | None = None,
-    path: str | None = None,
-    local_folder: str | None = None,
+    remote_path: str | None = None,
 ) -> None:
+    local_folder = _resolve_local_folder(remote_path, path_map)
     _conn().execute(
         "INSERT OR REPLACE INTO bazarr_series"
-        " (sonarr_id, title, path, local_folder, updated_at)"
-        " VALUES (?,?,?,?,?)",
-        (sonarr_id, title, path, local_folder, updated_at),
+        " (sonarr_id, title, local_folder, updated_at)"
+        " VALUES (?,?,?,?)",
+        (sonarr_id, title, local_folder, updated_at),
     )
 
 
@@ -1097,17 +1155,18 @@ def upsert_radarr_movie(
     *,
     movie_id: int,
     updated_at: int,
+    path_map: dict[str, str],
     tmdb_id: int | None = None,
     title: str | None = None,
     year: int | None = None,
-    path: str | None = None,
-    local_path: str | None = None,
+    remote_path: str | None = None,
 ) -> None:
+    local_path = _resolve_local_file(remote_path, path_map)
     _conn().execute(
         "INSERT OR REPLACE INTO radarr_movie"
-        " (movie_id, tmdb_id, title, year, path, local_path, updated_at)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (movie_id, tmdb_id, title, year, path, local_path, updated_at),
+        " (movie_id, tmdb_id, title, year, local_path, updated_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (movie_id, tmdb_id, title, year, local_path, updated_at),
     )
 
 
@@ -1139,17 +1198,18 @@ def upsert_sonarr_series(
     *,
     series_id: int,
     updated_at: int,
+    path_map: dict[str, str],
     tvdb_id: int | None = None,
     title_slug: str | None = None,
     title: str | None = None,
-    path: str | None = None,
-    local_folder: str | None = None,
+    remote_path: str | None = None,
 ) -> None:
+    local_folder = _resolve_local_folder(remote_path, path_map)
     _conn().execute(
         "INSERT OR REPLACE INTO sonarr_series"
-        " (series_id, tvdb_id, title_slug, title, path, local_folder, updated_at)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (series_id, tvdb_id, title_slug, title, path, local_folder, updated_at),
+        " (series_id, tvdb_id, title_slug, title, local_folder, updated_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (series_id, tvdb_id, title_slug, title, local_folder, updated_at),
     )
 
 

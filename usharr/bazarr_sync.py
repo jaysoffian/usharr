@@ -14,12 +14,11 @@ matching so deep-link lookup at render time is one indexed query.
 import asyncio
 import logging
 import time
-from pathlib import Path
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from usharr import db, plex
+from usharr import db
 from usharr.config import INTERVAL_SECONDS, Config
 
 logger = logging.getLogger(__name__)
@@ -64,29 +63,6 @@ async def _get[T: _Model](model: type[T], base: str, path: str, api_key: str) ->
         raise RuntimeError(msg) from exc
 
 
-def _collect_folders(paths: set[str]) -> set[str]:
-    """Every ancestor directory of every media_file path.
-
-    Used as the candidate set for suffix-matching Bazarr's folder paths
-    (movie folder, series folder, etc.) against our local layout.
-    """
-    folders: set[str] = set()
-    for p in paths:
-        parent = Path(p).parent
-        while True:
-            s = str(parent)
-            if not s or s in {"/", parent.anchor}:
-                break
-            if s in folders:
-                break
-            folders.add(s)
-            new_parent = parent.parent
-            if new_parent == parent:
-                break
-            parent = new_parent
-    return folders
-
-
 def _year_to_int(year: str | int | None) -> int | None:
     if year is None:
         return None
@@ -121,38 +97,28 @@ async def sync_once(config: Config) -> dict:
         logger.warning("bazarr_sync: fetch failed: %s", exc)
         return {"error": str(exc)}
 
-    file_paths = db.list_paths()
-    folders = _collect_folders(file_paths)
     now = int(time.time())
 
     seen_movies: set[int] = set()
     for m in movies_resp.data:
         seen_movies.add(m.radarr_id)
-        # Bazarr's movies API returns the actual file path; match against
-        # our media_file paths directly by longest suffix.
-        mapped = plex.apply_path_map(m.path, bz.path_map) if m.path else ""
-        local = plex.match_local_path(mapped, file_paths) if mapped else None
         db.upsert_bazarr_movie(
             radarr_id=m.radarr_id,
             title=m.title or None,
             year=_year_to_int(m.year),
-            path=m.path or None,
-            local_path=local,
+            remote_path=m.path or None,
+            path_map=bz.path_map,
             updated_at=now,
         )
 
     seen_series: set[int] = set()
     for s in series_resp.data:
         seen_series.add(s.sonarr_series_id)
-        # Series API returns the show's root folder; match against the set
-        # of ancestor directories we know about.
-        mapped = plex.apply_path_map(s.path, bz.path_map) if s.path else ""
-        local = plex.match_local_path(mapped, folders) if mapped else None
         db.upsert_bazarr_series(
             sonarr_id=s.sonarr_series_id,
             title=s.title or None,
-            path=s.path or None,
-            local_folder=local,
+            remote_path=s.path or None,
+            path_map=bz.path_map,
             updated_at=now,
         )
 

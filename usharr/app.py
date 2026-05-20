@@ -812,13 +812,8 @@ async def get_info_by_content_id(content_id: str) -> InfoByContentIdResponse:
             detail=f"no Media/Part for content_id={content_id}",
         )
     config: Config = app.state.config
-    db_paths = db.list_paths()
     for f in plex_files:
-        mapped = plex.apply_path_map(f, config.plex.path_map)
-        local = plex.match_local_path(mapped, db_paths)
-        if local is None:
-            continue
-        row = db.get(local)
+        row = db.get_by_remote_path(f, config.plex.path_map)
         if row is not None:
             return InfoByContentIdResponse(
                 **_build_info(row).model_dump(),

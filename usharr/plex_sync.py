@@ -84,13 +84,8 @@ def _pick_file(item: _LibMetadata) -> str | None:
     return next((p.file for m in item.media for p in m.parts if p.file), None)
 
 
-def _upsert(
-    item: _LibMetadata, db_paths: set[str], path_map: dict[str, str]
-) -> str | None:
-    plex_file = _pick_file(item)
-    mapped = plex.apply_path_map(plex_file, path_map) if plex_file else None
-    local_path = plex.match_local_path(mapped, db_paths) if mapped else None
-    db.upsert_plex_item(
+def _upsert(item: _LibMetadata, path_map: dict[str, str]) -> str | None:
+    return db.upsert_plex_item(
         rating_key=item.rating_key,
         item_type=item.type or "movie",
         title=item.title or None,
@@ -98,11 +93,10 @@ def _upsert(
         show_title=item.grandparent_title,
         season_number=item.parent_index,
         episode_number=item.index,
-        plex_path=plex_file,
-        local_path=local_path,
+        remote_path=_pick_file(item),
+        path_map=path_map,
         updated_at=int(time.time()),
     )
-    return local_path
 
 
 async def sync_once(config: Config) -> dict:
@@ -119,7 +113,6 @@ async def sync_once(config: Config) -> dict:
         f"{server_url}/library/sections",
     )
 
-    db_paths = db.list_paths()
     seen: set[str] = set()
     upserted = 0
 
@@ -139,7 +132,7 @@ async def sync_once(config: Config) -> dict:
             if not item.rating_key:
                 continue
             seen.add(item.rating_key)
-            _upsert(item, db_paths, config.plex.path_map)
+            _upsert(item, config.plex.path_map)
             upserted += 1
 
     existing = db.list_plex_rating_keys()
@@ -215,7 +208,7 @@ async def handle_webhook(payload: dict[str, Any], config: Config) -> dict:
             **item.model_dump(by_alias=True) | {"ratingKey": rating_key}
         )
 
-    local_path = _upsert(item, db.list_paths(), config.plex.path_map)
+    local_path = _upsert(item, config.plex.path_map)
     return {
         "event": event,
         "action": "upserted",

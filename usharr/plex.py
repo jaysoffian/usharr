@@ -6,13 +6,6 @@ Auth flow:
     3. usharr polls the PIN until ``authToken`` is set, then discovers a
        reachable server via /api/v2/resources and stores ``token`` +
        ``server_url`` + ``server_name`` + ``client_id`` in the kv table.
-
-Runtime path mapping:
-    Plex-reported file paths are from the Plex server's filesystem view,
-    which may not match this container's mounts. Rather than force the
-    user to configure a prefix map, we match by longest-matching path
-    suffix against the set of paths already in the aspect table — media
-    filenames are typically distinctive enough to be unique.
 """
 
 import asyncio
@@ -349,36 +342,3 @@ async def resolve_rating_key(rating_key: str) -> list[str]:
         for part in media.parts
         if part.file
     ]
-
-
-# --- path matching --------------------------------------------------------
-
-
-def match_local_path(plex_path: str, db_paths: set[str]) -> str | None:
-    """Find the local DB path for a Plex-reported path by longest suffix.
-
-    Tries the full Plex path first (matches if mounts happen to align),
-    then drops leading path components one at a time. Returns the first
-    suffix length at which exactly one DB path matches; returns None if
-    none match or the match is ambiguous at every depth.
-    """
-    parts = plex_path.strip("/").split("/")
-    for i in range(len(parts)):
-        suffix = "/" + "/".join(parts[i:])
-        matches = [p for p in db_paths if p.endswith(suffix)]
-        if len(matches) == 1:
-            return matches[0]
-    return None
-
-
-def apply_path_map(path: str, path_map: dict[str, str]) -> str:
-    """Rewrite a remote path to local using a {local: remote} prefix map.
-
-    Returns the input unchanged when no prefix matches; match_local_path's
-    suffix search still runs afterward, so an empty or partial map is safe.
-    """
-    for local, remote in path_map.items():
-        r = remote.rstrip("/")
-        if path == r or path.startswith(r + "/"):
-            return local.rstrip("/") + path[len(r) :]
-    return path

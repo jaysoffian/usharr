@@ -20,7 +20,6 @@ library:
 # Provides:
 #   1. Deep linking to video files in Plex Media Server
 #   2. Ability to query API by Plex ratingKey
-# Note: path_map is optional
 #
 # plex:
 #   url: https://plex.example.com
@@ -39,7 +38,6 @@ library:
 ###############################################################################
 # Enable Bazarr integration (optional)
 # Provides: deep linking to video files in Bazarr
-# Note: path_map is optional
 #
 # bazarr:
 #   url: https://bazarr.example.com
@@ -51,7 +49,6 @@ library:
 ######################################################
 # Enable Radarr integration (optional)
 # Provides: deep linking to video files in Radarr
-# Note: path_map is optional
 #
 # radarr:
 #   url: https://radarr.example.com
@@ -62,7 +59,6 @@ library:
 ######################################################
 # Enable Sonarr integration (optional)
 # Provides: deep linking to video files in Sonarr
-# Note: path_map is optional
 #
 # sonarr:
 #   url: https://sonarr.example.com
