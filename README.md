@@ -256,14 +256,11 @@ set_theater_curtains_for_aspect:
       target:
         entity_id: cover.theater_curtains
       data:
-
         position: '{{ position | int }}'
 ###
 ### automations.yaml
 ###
-- id: '1234567890'
-  alias: Theater Curtains Match Plex
-  description: ''
+- alias: Theater Curtains Match Plex
   triggers:
   - trigger: state
     entity_id:
@@ -277,15 +274,13 @@ set_theater_curtains_for_aspect:
   actions:
   - if:
     - condition: template
-      value_template: '{{ trigger.entity_id == ''input_boolean.theater_curtains_match_plex''
-        }}'
+      value_template: '{{ trigger.entity_id == ''input_boolean.theater_curtains_match_plex' }}'
     then:
     - action: input_boolean.turn_off
       target:
         entity_id: input_boolean.theater_curtains_match_plex
     - variables:
-        player: "{{ ['media_player.theater_plex_infuse',\n    'media_player.theater_plex_kodi']\n
-          \  | select('is_state', 'playing') | list | first | default('') }}"
+        player: "{{ ['media_player.theater_plex_infuse', 'media_player.theater_plex_kodi'] | select('is_state', 'playing') | list | first | default('') }}"
     - condition: template
       value_template: '{{ player != "" }}'
     - variables:
@@ -300,33 +295,32 @@ set_theater_curtains_for_aspect:
         seconds: 3
         milliseconds: 0
     - condition: template
-      value_template: "{{ states(player) == 'playing'\n   and state_attr(player, 'media_content_id')
-        == content_id }}"
+      value_template: "{{ states(player) == 'playing'\n   and state_attr(player, 'media_content_id') == content_id }}"
   - condition: template
     value_template: '{{ content_id is not none }}'
   - action: rest_command.usharr_info_by_content_id
     data:
       content_id: '{{ content_id }}'
-    response_variable: usharr
+    response_variable: response
   - condition: template
-    value_template: '{{ usharr.status == 200 }}'
+    value_template: '{{ response.status == 200 }}'
   - variables:
-      ar: '{{ usharr["content"]["aspect"]["widest"] | float(0) }}'
+      aspect_ratio: '{{ response["content"]["aspect"]["widest"] | float(0) }}'
   - action: lumagen.show_osd_message
     data:
       entity_id: remote.theater_lumagen
-      line_one: Aspect {{ "%.2f" | format(ar) }}
+      line_one: Aspect {{ "%.2f" | format(aspect_ratio) }}
       duration: 1
   - action: script.set_theater_curtains_for_aspect
     data:
-      aspect: '{{ ar }}'
+      aspect: '{{ aspect_ratio }}'
   mode: single
 
 ```
 
-This automation looks up the aspect ratio of what's currently playing (as reported by the [Plex Media Server HA integration](https://www.home-assistant.io/integrations/plex/)) and then adjusts my theater screen curtains to match. It simultaneously displays the AR using my [Lumagen Radiance Pro HA integration(https://github.com/jaysoffian/ha-lumagen).
+This automation looks up the aspect ratio of what's currently playing (as reported by the [Plex Media Server HA integration](https://www.home-assistant.io/integrations/plex/)) and then adjusts my theater screen curtains to match. It simultaneously displays the AR using my [Lumagen Radiance Pro HA integration](https://github.com/jaysoffian/ha-lumagen).
 
-The automation triggers either when one of my media players (Infuse on Apple TV or Kodi on Ugoos AM6B+) starts playing, or when I manually trigger it using the `theater_curtains_match_plex` input boolean (which is exposed to HomeKit via [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/) so I can activate it via Siri).
+The automation runs either when one of my media players (Infuse on Apple TV or Kodi on Ugoos AM6B+) starts playing, or when I manually trigger it using the `theater_curtains_match_plex` input boolean (which is exposed to HomeKit via [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/) so I can activate it via Siri).
 
 ## Development
 
