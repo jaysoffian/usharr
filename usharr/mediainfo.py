@@ -73,7 +73,7 @@ class MediaInfoResult:
 # --- helpers --------------------------------------------------------------
 
 
-def _get(track: object, *names: str) -> str | None:
+def get(track: object, *names: str) -> str | None:
     for n in names:
         v = getattr(track, n, None)
         if v not in (None, ""):
@@ -81,7 +81,7 @@ def _get(track: object, *names: str) -> str | None:
     return None
 
 
-def _int(v: str | None) -> int | None:
+def to_int(v: str | None) -> int | None:
     if v is None:
         return None
     try:
@@ -90,7 +90,7 @@ def _int(v: str | None) -> int | None:
         return None
 
 
-def _float(v: str | None) -> float | None:
+def to_float(v: str | None) -> float | None:
     if v is None:
         return None
     try:
@@ -99,7 +99,7 @@ def _float(v: str | None) -> float | None:
         return None
 
 
-def _bool(v: str | None) -> bool:
+def to_bool(v: str | None) -> bool:
     if v is None:
         return False
     return str(v).strip().lower() in {"yes", "true", "1"}
@@ -107,7 +107,7 @@ def _bool(v: str | None) -> bool:
 
 # --- normalization ---------------------------------------------------------
 
-_VIDEO_ALIAS = {
+VIDEO_ALIAS = {
     "AVC": "AVC",
     "H264": "AVC",
     "H.264": "AVC",
@@ -124,12 +124,12 @@ _VIDEO_ALIAS = {
 }
 
 
-def _norm_video_codec(fmt: str | None, codec_id: str | None) -> str:
+def norm_video_codec(fmt: str | None, codec_id: str | None) -> str:
     raw = (fmt or codec_id or "").strip().upper()
-    return _VIDEO_ALIAS.get(raw, raw or "Unknown")
+    return VIDEO_ALIAS.get(raw, raw or "Unknown")
 
 
-_AUDIO_ALIAS = {
+AUDIO_ALIAS = {
     "E-AC-3": "EAC3",
     "EAC3": "EAC3",
     "AC-3": "AC3",
@@ -145,7 +145,7 @@ _AUDIO_ALIAS = {
 }
 
 
-def _norm_audio_codec(
+def norm_audio_codec(
     fmt: str | None,
     profile: str | None,
     commercial: str | None,
@@ -190,10 +190,10 @@ def _norm_audio_codec(
         if "ES" in prof or raw == "DTS ES":
             return "DTS-ES"
         return "DTS"
-    return _AUDIO_ALIAS.get(raw, raw or "Unknown")
+    return AUDIO_ALIAS.get(raw, raw or "Unknown")
 
 
-_SUB_ALIAS = {
+SUB_ALIAS = {
     "PGS": "PGS",
     "HDMV PGS": "PGS",
     "PGSSUB": "PGS",
@@ -211,16 +211,16 @@ _SUB_ALIAS = {
 }
 
 
-def _norm_sub_codec(fmt: str | None, codec_id: str | None) -> str:
+def norm_sub_codec(fmt: str | None, codec_id: str | None) -> str:
     raw = (fmt or codec_id or "").strip().upper()
     for prefix in ("S_HDMV/", "S_TEXT/", "S_VOBSUB", "S_"):
         if raw.startswith(prefix):
             raw = raw.removeprefix(prefix)
             break
-    return _SUB_ALIAS.get(raw, raw or "Unknown")
+    return SUB_ALIAS.get(raw, raw or "Unknown")
 
 
-def _build_hdr_format(track: object) -> str | None:
+def build_hdr_format(track: object) -> str | None:
     """Compose the fullest HDR description available.
 
     pymediainfo mirrors MediaInfo's `HDR_Format/String` (the pre-assembled
@@ -228,18 +228,18 @@ def _build_hdr_format(track: object) -> str | None:
     dvhe.08.06, BL+RPU, no metadata compression, HDR10 compatible / SMPTE
     ST 2094 App 4, Version HDR10+ Profile B, HDR10+ Profile B compatible"`)
     as `other_hdr_format`, a list. Prefer that; fall back to assembling
-    the raw sub-fields (`hdr_format`, `_version`, `_profile`, `_settings`,
-    `_compatibility`) when it's missing. The raw fields use `" / "` as a
+    the raw sub-fields (`hdr_format`, `version`, `profile`, `settings`,
+    `compatibility`) when it's missing. The raw fields use `" / "` as a
     per-HDR-system separator with empty slots when one system lacks a
-    value; `_clean_slashes` drops those.
+    value; `clean_slashes` drops those.
     """
     other = getattr(track, "other_hdr_format", None)
     if isinstance(other, list) and other:
         return str(other[0])
-    base = _get(track, "hdr_format")
+    base = get(track, "hdr_format")
     if not base:
         return None
-    base = _clean_slashes(base)
+    base = clean_slashes(base)
     extras: list[str] = []
     for name in (
         "hdr_format_version",
@@ -247,10 +247,10 @@ def _build_hdr_format(track: object) -> str | None:
         "hdr_format_settings",
         "hdr_format_compatibility",
     ):
-        v = _get(track, name)
+        v = get(track, name)
         if not v:
             continue
-        cleaned = _clean_slashes(v)
+        cleaned = clean_slashes(v)
         if cleaned and cleaned not in base:
             extras.append(cleaned)
     if extras:
@@ -258,25 +258,25 @@ def _build_hdr_format(track: object) -> str | None:
     return base
 
 
-def _clean_slashes(v: str) -> str:
+def clean_slashes(v: str) -> str:
     """Drop empty segments around MediaInfo's per-stream `' / '` separator."""
     return " / ".join(p.strip() for p in v.split("/") if p.strip())
 
 
-_DV_PROFILE_RE = re.compile(r"dv(?:he|av)\.(\d{1,2})", re.IGNORECASE)
+DV_PROFILE_RE = re.compile(r"dv(?:he|av)\.(\d{1,2})", re.IGNORECASE)
 
 
-def _dv_profile_num(track: object) -> int | None:
+def dv_profile_num(track: object) -> int | None:
     """Return the Dolby Vision major profile (5, 7, 8, ...) if present."""
-    profile = _get(track, "hdr_format_profile") or ""
-    m = _DV_PROFILE_RE.search(profile)
+    profile = get(track, "hdr_format_profile") or ""
+    m = DV_PROFILE_RE.search(profile)
     return int(m.group(1)) if m else None
 
 
-_DOVI_TOOL_TIMEOUT = 30
+DOVI_TOOL_TIMEOUT = 30
 
 
-def _dv_el_type(path: Path) -> str | None:
+def dv_el_type(path: Path) -> str | None:
     """Return profile-7 enhancement layer type ("MEL" or "FEL").
 
     MediaInfoLib doesn't expose this yet (PR #2447 pending). Extract one
@@ -289,14 +289,14 @@ def _dv_el_type(path: Path) -> str | None:
                 ["dovi_tool", "extract-rpu", path, "-l", "1", "-o", tmp.name],
                 check=True,
                 capture_output=True,
-                timeout=_DOVI_TOOL_TIMEOUT,
+                timeout=DOVI_TOOL_TIMEOUT,
             )
             info = subprocess.run(
                 ["dovi_tool", "info", "-i", tmp.name, "-f", "0"],
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=_DOVI_TOOL_TIMEOUT,
+                timeout=DOVI_TOOL_TIMEOUT,
             )
         except (
             FileNotFoundError,
@@ -319,9 +319,9 @@ def _dv_el_type(path: Path) -> str | None:
         return el if el in ("MEL", "FEL") else None
 
 
-def _detect_hdr(track: object) -> str | None:
-    hdr_fmt = (_get(track, "hdr_format", "hdr_format_commercial") or "").lower()
-    xfer = (_get(track, "transfer_characteristics") or "").lower()
+def detect_hdr(track: object) -> str | None:
+    hdr_fmt = (get(track, "hdr_format", "hdr_format_commercial") or "").lower()
+    xfer = (get(track, "transfer_characteristics") or "").lower()
 
     has_dv = "dolby vision" in hdr_fmt or "dolbyvision" in hdr_fmt
     # HDR10+: dynamic metadata (SMPTE ST 2094 App 4). Matching by the
@@ -345,7 +345,7 @@ def _detect_hdr(track: object) -> str | None:
 
     parts = []
     if has_dv:
-        p = _dv_profile_num(track)
+        p = dv_profile_num(track)
         parts.append(f"DV({p})" if p is not None else "DV")
     if has_hdr10:
         parts.append("HDR10")
@@ -356,7 +356,7 @@ def _detect_hdr(track: object) -> str | None:
     return "/".join(parts) if parts else None
 
 
-_CHANNEL_LAYOUT = {
+CHANNEL_LAYOUT = {
     1: "1.0",
     2: "2.0",
     3: "2.1",
@@ -366,13 +366,13 @@ _CHANNEL_LAYOUT = {
 }
 
 
-def _layout(channels: int | None) -> str | None:
+def layout(channels: int | None) -> str | None:
     if channels is None:
         return None
-    return _CHANNEL_LAYOUT.get(channels, f"{channels}ch")
+    return CHANNEL_LAYOUT.get(channels, f"{channels}ch")
 
 
-def _is_sdh(title: str | None) -> bool:
+def is_sdh(title: str | None) -> bool:
     if not title:
         return False
     t = title.lower()
@@ -387,7 +387,7 @@ def _is_sdh(title: str | None) -> bool:
 # --- parse ----------------------------------------------------------------
 
 
-def _parse_sync(path: Path) -> MediaInfoResult:
+def parse_sync(path: Path) -> MediaInfoResult:
     mi = MediaInfo.parse(str(path))
     container: str | None = None
     duration_s: float | None = None
@@ -405,86 +405,86 @@ def _parse_sync(path: Path) -> MediaInfoResult:
     for t in mi.tracks:
         tt = t.track_type
         if tt == "General":
-            container = _get(t, "format") or path.suffix.lstrip(".").upper() or None
-            dur_ms = _float(_get(t, "duration"))
+            container = get(t, "format") or path.suffix.lstrip(".").upper() or None
+            dur_ms = to_float(get(t, "duration"))
             if dur_ms is not None:
                 duration_s = dur_ms / 1000.0
-            overall_bit_rate = _int(_get(t, "overall_bit_rate"))
-            file_size = _int(_get(t, "file_size"))
+            overall_bit_rate = to_int(get(t, "overall_bit_rate"))
+            file_size = to_int(get(t, "file_size"))
         elif tt == "Video" and video is None:
-            video_stream_br = _int(_get(t, "bit_rate"))
-            video_nominal_br = _int(_get(t, "nominal_bit_rate"))
+            video_stream_br = to_int(get(t, "bit_rate"))
+            video_nominal_br = to_int(get(t, "nominal_bit_rate"))
             video = VideoInfo(
-                codec=_norm_video_codec(_get(t, "format"), _get(t, "codec_id")),
-                profile=_get(t, "format_profile"),
-                width=_int(_get(t, "width")) or 0,
-                height=_int(_get(t, "height")) or 0,
-                bit_depth=_int(_get(t, "bit_depth")),
-                hdr=_detect_hdr(t),
+                codec=norm_video_codec(get(t, "format"), get(t, "codec_id")),
+                profile=get(t, "format_profile"),
+                width=to_int(get(t, "width")) or 0,
+                height=to_int(get(t, "height")) or 0,
+                bit_depth=to_int(get(t, "bit_depth")),
+                hdr=detect_hdr(t),
                 # Verbose HDR string surfaced on detail page. For Dolby
                 # Vision BD remuxes this includes the profile code
                 # (dvhe.07.06) and layer structure (BL+EL+RPU).
-                hdr_format=_build_hdr_format(t),
-                frame_rate=_float(_get(t, "frame_rate")),
-                max_bit_rate=_int(_get(t, "maximum_bit_rate")),
+                hdr_format=build_hdr_format(t),
+                frame_rate=to_float(get(t, "frame_rate")),
+                max_bit_rate=to_int(get(t, "maximum_bit_rate")),
             )
             if (
-                _dv_profile_num(t) == 7
+                dv_profile_num(t) == 7
                 and video.hdr_format
                 and "BL+EL+RPU" in video.hdr_format
             ):
-                el = _dv_el_type(path)
+                el = dv_el_type(path)
                 if el:
                     video.hdr_format = video.hdr_format.replace(
                         "BL+EL+RPU",
                         f"BL+{el}+RPU",
                     )
         elif tt == "Audio":
-            channels = _int(_get(t, "channel_s", "channels"))
-            raw_format = _get(t, "format")
-            commercial = _get(t, "commercial_name", "format_commercial_if_any")
-            bit_rate_hz = _int(_get(t, "bit_rate"))
+            channels = to_int(get(t, "channel_s", "channels"))
+            raw_format = get(t, "format")
+            commercial = get(t, "commercial_name", "format_commercial_if_any")
+            bit_rate_hz = to_int(get(t, "bit_rate"))
             audio.append(
                 AudioTrack(
                     idx=audio_idx,
-                    codec=_norm_audio_codec(
+                    codec=norm_audio_codec(
                         raw_format,
-                        _get(t, "format_profile"),
+                        get(t, "format_profile"),
                         commercial,
                     ),
                     channels=channels or 0,
-                    layout=_layout(channels),
-                    language=norm_lang(_get(t, "language", "other_language")),
-                    title=_get(t, "title"),
-                    is_default=_bool(_get(t, "default")),
-                    is_forced=_bool(_get(t, "forced")),
+                    layout=layout(channels),
+                    language=norm_lang(get(t, "language", "other_language")),
+                    title=get(t, "title"),
+                    is_default=to_bool(get(t, "default")),
+                    is_forced=to_bool(get(t, "forced")),
                     format=raw_format,
                     commercial_name=commercial,
                     bit_rate=bit_rate_hz,
-                    bit_rate_mode=_get(t, "bit_rate_mode"),
-                    sample_rate=_int(_get(t, "sampling_rate")),
-                    bit_depth=_int(_get(t, "bit_depth")),
-                    compression_mode=_get(t, "compression_mode"),
+                    bit_rate_mode=get(t, "bit_rate_mode"),
+                    sample_rate=to_int(get(t, "sampling_rate")),
+                    bit_depth=to_int(get(t, "bit_depth")),
+                    compression_mode=get(t, "compression_mode"),
                 ),
             )
             audio_idx += 1
         elif tt == "Text":
-            title = _get(t, "title")
+            title = get(t, "title")
             subtitle.append(
                 SubtitleTrack(
                     idx=sub_idx,
-                    codec=_norm_sub_codec(_get(t, "format"), _get(t, "codec_id")),
-                    language=norm_lang(_get(t, "language", "other_language")),
+                    codec=norm_sub_codec(get(t, "format"), get(t, "codec_id")),
+                    language=norm_lang(get(t, "language", "other_language")),
                     title=title,
-                    is_default=_bool(_get(t, "default")),
-                    is_forced=_bool(_get(t, "forced")),
-                    is_sdh=_is_sdh(title),
+                    is_default=to_bool(get(t, "default")),
+                    is_forced=to_bool(get(t, "forced")),
+                    is_sdh=is_sdh(title),
                 ),
             )
             sub_idx += 1
 
     if video is not None:
-        video.bit_rate = _resolve_video_bit_rate(
+        video.bit_rate = resolve_video_bit_rate(
             stream=video_stream_br,
             nominal=video_nominal_br,
             overall=overall_bit_rate,
@@ -502,7 +502,7 @@ def _parse_sync(path: Path) -> MediaInfoResult:
     )
 
 
-def _resolve_video_bit_rate(
+def resolve_video_bit_rate(
     *,
     stream: int | None,
     nominal: int | None,
@@ -530,7 +530,7 @@ def _resolve_video_bit_rate(
 
 async def extract(path: Path) -> MediaInfoResult:
     """Parse a file via pymediainfo off the event loop."""
-    return await asyncio.to_thread(_parse_sync, path)
+    return await asyncio.to_thread(parse_sync, path)
 
 
 # --- dict adapters for db layer -------------------------------------------

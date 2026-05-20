@@ -10,13 +10,13 @@ import langcodes
 from usharr.db import AudioTrackRow, MediainfoRow, SubtitleTrackRow
 from usharr.langs import to_english_name
 
-_YEAR_RE = re.compile(r"\((\d{4})\)")
-_EDITION_RE = re.compile(r"\{edition-([^}]+)\}")
+YEAR_RE = re.compile(r"\((\d{4})\)")
+EDITION_RE = re.compile(r"\{edition-([^}]+)\}")
 
 
 def year_from_path(path: str) -> int | None:
     """Parse `(YYYY)` from filename or folder; return the first plausible year."""
-    for m in _YEAR_RE.finditer(path):
+    for m in YEAR_RE.finditer(path):
         y = int(m.group(1))
         if 1900 <= y <= 2099:
             return y
@@ -25,7 +25,7 @@ def year_from_path(path: str) -> int | None:
 
 def edition_from_path(path: str) -> str | None:
     """Parse `{edition-NAME}` (Plex/Jellyfin convention) from the path."""
-    m = _EDITION_RE.search(path)
+    m = EDITION_RE.search(path)
     return m.group(1).strip() if m else None
 
 
@@ -52,11 +52,11 @@ def format_video(
 
 
 # (width_cap, height_cap, label) — ordered; first match wins. Caps get a
-# 1% tolerance via _blur so encoders that shave a few rows (e.g. 1916x1076
+# 1% tolerance via blur so encoders that shave a few rows (e.g. 1916x1076
 # WEB-DL) still land in the right bucket. Order matters: PAL 776x592 must
 # be checked before 960x544, etc. Ported from tinyMediaManager's
 # MediaFileHelper.getVideoFormat (itself an XBMC/Kodi port).
-_RESOLUTION_LADDER: tuple[tuple[int, int, str], ...] = (
+RESOLUTION_LADDER: tuple[tuple[int, int, str], ...] = (
     (128, 96, "SD"),
     (160, 120, "SD"),
     (176, 144, "SD"),
@@ -86,15 +86,15 @@ _RESOLUTION_LADDER: tuple[tuple[int, int, str], ...] = (
 )
 
 
-def _blur(value: int) -> int:
+def blur(value: int) -> int:
     return value + value // 100
 
 
 def resolution_bucket(w: int | None, h: int | None) -> str | None:
     if not h or not w:
         return None
-    for w_cap, h_cap, label in _RESOLUTION_LADDER:
-        if w <= _blur(w_cap) and h <= _blur(h_cap):
+    for w_cap, h_cap, label in RESOLUTION_LADDER:
+        if w <= blur(w_cap) and h <= blur(h_cap):
             return label
     return "8K"
 
@@ -150,63 +150,63 @@ def mediainfo_badges(
     if mi is None:
         return badges
     if resolution_bucket(mi.video_width, mi.video_height) == "4K":
-        badges.append(_badge("video/4k.svg", "4K"))
+        badges.append(badge("video/4k.svg", "4K"))
     hdr = (mi.video_hdr or "").upper()
     if "DV" in hdr:
-        badges.append(_badge("video/dolby_vision.svg", "Dolby Vision"))
+        badges.append(badge("video/dolby_vision.svg", "Dolby Vision"))
     if "HDR10+" in hdr:
-        badges.append(_badge("video/hdr10+.svg", "HDR10+"))
+        badges.append(badge("video/hdr10+.svg", "HDR10+"))
     elif "HDR10" in hdr:
-        badges.append(_badge("video/hdr10.svg", "HDR10"))
+        badges.append(badge("video/hdr10.svg", "HDR10"))
 
-    primary = _pick_primary_audio(audio_tracks)
+    primary = pick_primary_audio(audio_tracks)
     if primary:
         codec = (primary.codec or "").upper()
         # Base codec first (DD+ / TrueHD / DTS-HD MA / ...), then the
         # immersive-format badge to its right — reads as "the underlying
         # codec, plus the object layer on top".
-        base = _audio_base_badge(codec)
+        base = audio_base_badge(codec)
         if base:
             badges.append(base)
         if "ATMOS" in codec:
-            badges.append(_badge("audio/codec/atmos.svg", "Dolby Atmos"))
+            badges.append(badge("audio/codec/atmos.svg", "Dolby Atmos"))
         if "DTS:X" in codec:
-            badges.append(_badge("audio/codec/dts-x.svg", "DTS:X"))
+            badges.append(badge("audio/codec/dts-x.svg", "DTS:X"))
     return badges
 
 
-def _badge(rel: str, alt: str) -> dict:
+def badge(rel: str, alt: str) -> dict:
     return {"src": f"/static/mediainfo/{rel}", "alt": alt}
 
 
-def _audio_base_badge(codec: str) -> dict | None:
+def audio_base_badge(codec: str) -> dict | None:
     if "EAC3" in codec:
-        return _badge("audio/codec/eac3.svg", "Dolby Digital Plus")
+        return badge("audio/codec/eac3.svg", "Dolby Digital Plus")
     if codec.startswith("TRUEHD"):
-        return _badge("audio/codec/truehd.svg", "Dolby TrueHD")
+        return badge("audio/codec/truehd.svg", "Dolby TrueHD")
     if codec == "AC3":
-        return _badge("audio/codec/ac3.svg", "Dolby Digital")
+        return badge("audio/codec/ac3.svg", "Dolby Digital")
     if "DTS-HD MA" in codec:
-        return _badge("audio/codec/dtshd-ma.svg", "DTS-HD MA")
+        return badge("audio/codec/dtshd-ma.svg", "DTS-HD MA")
     if "DTS-HD HRA" in codec:
-        return _badge("audio/codec/dtshd-hra.svg", "DTS-HD HRA")
+        return badge("audio/codec/dtshd-hra.svg", "DTS-HD HRA")
     if "DTS-ES" in codec:
-        return _badge("audio/codec/dts-es.svg", "DTS-ES")
+        return badge("audio/codec/dts-es.svg", "DTS-ES")
     # DTS:X already rendered above; plain DTS gets its own badge
     if codec.startswith("DTS") and "DTS:X" not in codec:
-        return _badge("audio/codec/dts.svg", "DTS")
+        return badge("audio/codec/dts.svg", "DTS")
     if codec == "AAC":
-        return _badge("audio/codec/aac.svg", "AAC")
+        return badge("audio/codec/aac.svg", "AAC")
     if codec == "FLAC":
-        return _badge("audio/codec/flac.svg", "FLAC")
+        return badge("audio/codec/flac.svg", "FLAC")
     if codec == "LPCM":
-        return _badge("audio/codec/lpcm.svg", "LPCM")
+        return badge("audio/codec/lpcm.svg", "LPCM")
     if codec == "PCM":
-        return _badge("audio/codec/pcm.svg", "PCM")
+        return badge("audio/codec/pcm.svg", "PCM")
     if codec == "MP3":
-        return _badge("audio/codec/mp3.svg", "MP3")
+        return badge("audio/codec/mp3.svg", "MP3")
     if codec == "OPUS":
-        return _badge("audio/codec/opus.svg", "Opus")
+        return badge("audio/codec/opus.svg", "Opus")
     return None
 
 
@@ -218,7 +218,7 @@ def _audio_base_badge(codec: str) -> dict | None:
 # "English"). `clean_audio_title` strips that redundancy at render time —
 # the DB stays unchanged.
 
-_AUDIO_TITLE_CODECS = [
+AUDIO_TITLE_CODECS = [
     "DTS-HD Master Audio",
     "DTS:X Master Audio",
     "DTS-HD HRA",
@@ -257,7 +257,7 @@ _AUDIO_TITLE_CODECS = [
     "HDMA",
 ]
 
-_AUDIO_TITLE_STRUCTURE = [
+AUDIO_TITLE_STRUCTURE = [
     r"\d+\.\d+(?:-EX)?(?:\s*\+\s*\d+(?:\s*Objects?)?)?",
     r"Lt/Rt",
     r"\d+(?:\.\d+)?\s*kHz",
@@ -267,13 +267,13 @@ _AUDIO_TITLE_STRUCTURE = [
     r"Objects?",
 ]
 
-_AUDIO_TITLE_MISC = [r"@", r"w/", r"embedded", r"Kbps", r"kbps"]
+AUDIO_TITLE_MISC = [r"@", r"w/", r"embedded", r"Kbps", r"kbps"]
 
 # Brand fragments. Counted as tech for pure-tech detection AND folded into a
 # strict-anchored edge-peel ("1.0 Dolby Digital Dubbing" → "Dubbing"). They
 # do NOT extend a language-only peel — that's why "English Audio Commentary"
 # becomes "Audio Commentary", not "Commentary".
-_AUDIO_TITLE_SOFT_BRAND = [
+AUDIO_TITLE_SOFT_BRAND = [
     "Dolby Atmos",
     "Atmos Audio",
     "Dolby",
@@ -287,27 +287,27 @@ _AUDIO_TITLE_SOFT_BRAND = [
 # Layout-style words. Counted as tech for pure-tech detection but never peel
 # at an edge — they pair with descriptive nouns ("Surround Mix", "Stereo
 # Remix", "Atmos Upmix", "Dual Mono") that we want to keep.
-_AUDIO_TITLE_SOFT_DESC = ["Atmos", "Stereo", "Mono", "Surround"]
+AUDIO_TITLE_SOFT_DESC = ["Atmos", "Stereo", "Mono", "Surround"]
 
 
-def _audio_title_alt(items: list[str]) -> str:
+def audio_title_alt(items: list[str]) -> str:
     return "|".join(re.sub(r"\s+", r"\\s+", x) for x in items)
 
 
-_AUDIO_TITLE_STRICT_SRC = (
+AUDIO_TITLE_STRICT_SRC = (
     "(?:"
-    + _audio_title_alt(_AUDIO_TITLE_CODECS + _AUDIO_TITLE_STRUCTURE + _AUDIO_TITLE_MISC)
+    + audio_title_alt(AUDIO_TITLE_CODECS + AUDIO_TITLE_STRUCTURE + AUDIO_TITLE_MISC)
     + ")"
 )
-_AUDIO_TITLE_SOFT_BRAND_SRC = "(?:" + _audio_title_alt(_AUDIO_TITLE_SOFT_BRAND) + ")"
-_AUDIO_TITLE_SOFT_DESC_SRC = "(?:" + _audio_title_alt(_AUDIO_TITLE_SOFT_DESC) + ")"
-_AUDIO_TITLE_STRICT_RE = re.compile(_AUDIO_TITLE_STRICT_SRC, re.IGNORECASE)
-_AUDIO_TITLE_BROAD_RE = re.compile(
+AUDIO_TITLE_SOFT_BRAND_SRC = "(?:" + audio_title_alt(AUDIO_TITLE_SOFT_BRAND) + ")"
+AUDIO_TITLE_SOFT_DESC_SRC = "(?:" + audio_title_alt(AUDIO_TITLE_SOFT_DESC) + ")"
+AUDIO_TITLE_STRICT_RE = re.compile(AUDIO_TITLE_STRICT_SRC, re.IGNORECASE)
+AUDIO_TITLE_BROAD_RE = re.compile(
     "|".join(
         [
-            _AUDIO_TITLE_STRICT_SRC,
-            _AUDIO_TITLE_SOFT_BRAND_SRC,
-            _AUDIO_TITLE_SOFT_DESC_SRC,
+            AUDIO_TITLE_STRICT_SRC,
+            AUDIO_TITLE_SOFT_BRAND_SRC,
+            AUDIO_TITLE_SOFT_DESC_SRC,
         ]
     ),
     re.IGNORECASE,
@@ -315,7 +315,7 @@ _AUDIO_TITLE_BROAD_RE = re.compile(
 
 # Glue numeric tech tokens to their units before tokenizing so a unit can't
 # end up tokenized away from its number ("48 kHz" → "48kHz").
-_AUDIO_TITLE_PRE_GLUE = [
+AUDIO_TITLE_PRE_GLUE = [
     (re.compile(r"(~?\d+(?:[ ,]\d+)*)\s+(Kbps)", re.IGNORECASE), r"\1\2"),
     (re.compile(r"(\d+(?:\.\d+)?)\s+(kHz)", re.IGNORECASE), r"\1\2"),
     (re.compile(r"(\d+)\s+(bits?)\b", re.IGNORECASE), r"\1\2"),
@@ -330,11 +330,11 @@ _AUDIO_TITLE_PRE_GLUE = [
 # Hyphens stay inside tokens (DTS-HD-MA, AC-3, 24-bit). Slashes stay too —
 # Lt/Rt is one token, and the outer split already chunks the title on
 # space-padded " / " section delimiters before this fires.
-_AUDIO_TITLE_TOKEN_SEP_RE = re.compile(r"([\s,]+)")
+AUDIO_TITLE_TOKEN_SEP_RE = re.compile(r"([\s,]+)")
 
 
 @lru_cache(maxsize=512)
-def _audio_title_lang_aliases(code: str | None) -> frozenset[str]:
+def audio_title_lang_aliases(code: str | None) -> frozenset[str]:
     if not code:
         return frozenset()
     out: set[str] = {code.lower()}
@@ -352,28 +352,28 @@ def _audio_title_lang_aliases(code: str | None) -> frozenset[str]:
     return frozenset(out)
 
 
-def _audio_title_pre_glue(s: str) -> str:
-    for pat, rep in _AUDIO_TITLE_PRE_GLUE:
+def audio_title_pre_glue(s: str) -> str:
+    for pat, rep in AUDIO_TITLE_PRE_GLUE:
         s = pat.sub(rep, s)
     return s
 
 
-def _audio_title_lang_alt(aliases: frozenset[str]) -> str:
+def audio_title_lang_alt(aliases: frozenset[str]) -> str:
     if not aliases:
         return ""
     return "|".join(re.escape(a) for a in sorted(aliases, key=len, reverse=True))
 
 
-def _audio_title_is_pure_tech(seg: str, aliases: frozenset[str]) -> bool:
+def audio_title_is_pure_tech(seg: str, aliases: frozenset[str]) -> bool:
     s = seg.strip()
     if not s:
         return True
     if s.lower() in aliases:
         return True
-    leftover = _AUDIO_TITLE_BROAD_RE.sub(" ", _audio_title_pre_glue(s))
+    leftover = AUDIO_TITLE_BROAD_RE.sub(" ", audio_title_pre_glue(s))
     if aliases:
         leftover = re.sub(
-            r"\b(?:" + _audio_title_lang_alt(aliases) + r")\b",
+            r"\b(?:" + audio_title_lang_alt(aliases) + r")\b",
             " ",
             leftover,
             flags=re.IGNORECASE,
@@ -382,29 +382,29 @@ def _audio_title_is_pure_tech(seg: str, aliases: frozenset[str]) -> bool:
     return not leftover
 
 
-def _audio_title_classify(token: str, aliases: frozenset[str]) -> str:
+def audio_title_classify(token: str, aliases: frozenset[str]) -> str:
     t = token.strip()
     if not t:
         return "plain"
     if t.lower() in aliases:
         return "lang"
-    if re.fullmatch(_AUDIO_TITLE_STRICT_SRC, t, re.IGNORECASE):
+    if re.fullmatch(AUDIO_TITLE_STRICT_SRC, t, re.IGNORECASE):
         return "strict"
-    cleaned = _AUDIO_TITLE_STRICT_RE.sub(" ", t)
+    cleaned = AUDIO_TITLE_STRICT_RE.sub(" ", t)
     if cleaned != t and not re.search(r"\w", cleaned):
         return "strict"
-    if re.fullmatch(_AUDIO_TITLE_SOFT_BRAND_SRC, t, re.IGNORECASE):
+    if re.fullmatch(AUDIO_TITLE_SOFT_BRAND_SRC, t, re.IGNORECASE):
         return "soft_brand"
-    if re.fullmatch(_AUDIO_TITLE_SOFT_DESC_SRC, t, re.IGNORECASE):
+    if re.fullmatch(AUDIO_TITLE_SOFT_DESC_SRC, t, re.IGNORECASE):
         return "soft_desc"
     return "plain"
 
 
-def _audio_title_peel_edge(seg: str, aliases: frozenset[str], from_left: bool) -> str:
-    parts = _AUDIO_TITLE_TOKEN_SEP_RE.split(seg)
+def audio_title_peel_edge(seg: str, aliases: frozenset[str], from_left: bool) -> str:
+    parts = AUDIO_TITLE_TOKEN_SEP_RE.split(seg)
     n = len(parts)
     token_indices = list(range(0, n, 2)) if from_left else list(range(n - 1, -1, -2))
-    classes = {i: _audio_title_classify(parts[i], aliases) for i in token_indices}
+    classes = {i: audio_title_classify(parts[i], aliases) for i in token_indices}
 
     innermost: int | None = None
     innermost_kind: str | None = None
@@ -440,29 +440,29 @@ def _audio_title_peel_edge(seg: str, aliases: frozenset[str], from_left: bool) -
     return "".join(parts[: max(cut, 0)])
 
 
-def _audio_title_edge_peel(seg: str, aliases: frozenset[str]) -> str:
+def audio_title_edge_peel(seg: str, aliases: frozenset[str]) -> str:
     prev = None
     s = seg.strip()
     while s != prev:
         prev = s
-        s = _audio_title_peel_edge(s, aliases, from_left=True).strip()
-        s = _audio_title_peel_edge(s, aliases, from_left=False).strip()
+        s = audio_title_peel_edge(s, aliases, from_left=True).strip()
+        s = audio_title_peel_edge(s, aliases, from_left=False).strip()
     return s.strip(" /,-+@")
 
 
-def _audio_title_strip_pure_tech_groups(s: str, aliases: frozenset[str]) -> str:
+def audio_title_strip_pure_tech_groups(s: str, aliases: frozenset[str]) -> str:
     while True:
         new = re.sub(
             r"\(([^()]*)\)",
             lambda m: (
-                "" if _audio_title_is_pure_tech(m.group(1), aliases) else m.group(0)
+                "" if audio_title_is_pure_tech(m.group(1), aliases) else m.group(0)
             ),
             s,
         )
         new = re.sub(
             r"\[([^\[\]]*)\]",
             lambda m: (
-                "" if _audio_title_is_pure_tech(m.group(1), aliases) else m.group(0)
+                "" if audio_title_is_pure_tech(m.group(1), aliases) else m.group(0)
             ),
             new,
         )
@@ -471,7 +471,7 @@ def _audio_title_strip_pure_tech_groups(s: str, aliases: frozenset[str]) -> str:
         s = new
 
 
-def _audio_title_unwrap_outer(s: str) -> str:
+def audio_title_unwrap_outer(s: str) -> str:
     s = s.strip()
     if len(s) >= 2 and s[0] == "(" and s[-1] == ")" and s.count("(") == 1:
         return s[1:-1].strip()
@@ -485,16 +485,16 @@ def clean_audio_title(title: str | None, lang_code: str | None) -> str:
     Details columns. Returns "" when only redundant info remained."""
     if not title:
         return ""
-    aliases = _audio_title_lang_aliases(lang_code)
-    t = _audio_title_pre_glue(title)
-    t = _audio_title_strip_pure_tech_groups(t, aliases)
+    aliases = audio_title_lang_aliases(lang_code)
+    t = audio_title_pre_glue(title)
+    t = audio_title_strip_pure_tech_groups(t, aliases)
     raw = [s.strip() for s in re.split(r"\s+/\s+", t) if s.strip()]
-    kept = [s for s in raw if not _audio_title_is_pure_tech(s, aliases)]
-    kept = [_audio_title_edge_peel(s, aliases) for s in kept]
+    kept = [s for s in raw if not audio_title_is_pure_tech(s, aliases)]
+    kept = [audio_title_edge_peel(s, aliases) for s in kept]
     kept = [s for s in kept if s]
     result = " / ".join(kept).strip()
-    result = _audio_title_unwrap_outer(result)
-    if result and _audio_title_is_pure_tech(result, aliases):
+    result = audio_title_unwrap_outer(result)
+    if result and audio_title_is_pure_tech(result, aliases):
         return ""
     return result
 
@@ -521,7 +521,7 @@ def format_audio_details(t: AudioTrackRow) -> str:
 
 def format_audio(audio_tracks: list[AudioTrackRow]) -> str:
     """Primary track summary, e.g. 'English (EAC3 5.1)' or just '(EAC3 5.1)'."""
-    primary = _pick_primary_audio(audio_tracks)
+    primary = pick_primary_audio(audio_tracks)
     if primary is None:
         return ""
     codec = primary.codec or "?"
@@ -533,7 +533,7 @@ def format_audio(audio_tracks: list[AudioTrackRow]) -> str:
     return f"({inner})"
 
 
-def _pick_primary_audio(tracks: list[AudioTrackRow]) -> AudioTrackRow | None:
+def pick_primary_audio(tracks: list[AudioTrackRow]) -> AudioTrackRow | None:
     if not tracks:
         return None
     for t in tracks:
@@ -542,11 +542,11 @@ def _pick_primary_audio(tracks: list[AudioTrackRow]) -> AudioTrackRow | None:
     return tracks[0]
 
 
-_TEXT_SUB_FORMATS = frozenset({"SRT", "ASS", "SSA", "WEBVTT", "TX3G", "TELETEXT"})
-_RASTER_SUB_FORMATS = frozenset({"PGS", "VOBSUB", "DVB"})
+TEXT_SUB_FORMATS = frozenset({"SRT", "ASS", "SSA", "WEBVTT", "TX3G", "TELETEXT"})
+RASTER_SUB_FORMATS = frozenset({"PGS", "VOBSUB", "DVB"})
 # Within a tier, prefer the common/readable format so the chip label
 # matches what the user expects to see.
-_SUB_FORMAT_PREF = {
+SUB_FORMAT_PREF = {
     "SRT": 0,
     "WEBVTT": 1,
     "ASS": 2,
@@ -570,15 +570,15 @@ def format_sub_chip(subtitle_tracks: list[SubtitleTrackRow]) -> dict | None:
 
     def tier(t: SubtitleTrackRow) -> int:
         fmt = (t.codec or "").upper()
-        if fmt in _TEXT_SUB_FORMATS:
+        if fmt in TEXT_SUB_FORMATS:
             return 1 if t.is_sdh else 0
-        if fmt in _RASTER_SUB_FORMATS:
+        if fmt in RASTER_SUB_FORMATS:
             return 3 if t.is_sdh else 2
         return 4
 
     def within_tier(t: SubtitleTrackRow) -> tuple[int, str]:
         fmt = (t.codec or "").upper()
-        return _SUB_FORMAT_PREF.get(fmt, 99), fmt
+        return SUB_FORMAT_PREF.get(fmt, 99), fmt
 
     english = [t for t in subtitle_tracks if t.language == "eng" and t.codec]
     if not english:
@@ -651,13 +651,13 @@ def format_season_episode(season: int | None, episode: int | None) -> str:
     return f"{s}{e}"
 
 
-_SORT_ARTICLES = ("the ", "a ", "an ")
+SORT_ARTICLES = ("the ", "a ", "an ")
 
 
 def sort_normalize(s: str) -> str:
     """Casefold and strip a leading English article for library sorting."""
     t = s.strip().casefold()
-    for prefix in _SORT_ARTICLES:
+    for prefix in SORT_ARTICLES:
         if t.startswith(prefix):
             return t[len(prefix) :]
     return t
@@ -679,8 +679,8 @@ def format_display_title(
             return f"{show_title} — {plex_title}"
         return plex_title
     stem = Path(media_file_path).stem
-    stem = _EDITION_RE.sub("", stem)
-    stem = _YEAR_RE.sub("", stem)
+    stem = EDITION_RE.sub("", stem)
+    stem = YEAR_RE.sub("", stem)
     return " ".join(stem.split()).strip(" -_.")
 
 

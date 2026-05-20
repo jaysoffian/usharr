@@ -23,7 +23,7 @@ from usharr.config import load_config
 from usharr.scanner import full_scan
 
 
-async def _cmd_probe(args: argparse.Namespace) -> int:
+async def cmd_probe(args: argparse.Namespace) -> int:
     load_config()
     logging.basicConfig(
         level=logging.DEBUG,
@@ -39,7 +39,7 @@ async def _cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _cmd_scan(_: argparse.Namespace) -> int:
+async def cmd_scan(_: argparse.Namespace) -> int:
     config = load_config()
     db.init_db()
     try:
@@ -50,7 +50,7 @@ async def _cmd_scan(_: argparse.Namespace) -> int:
     return 0
 
 
-async def _cmd_get(args: argparse.Namespace) -> int:
+async def cmd_get(args: argparse.Namespace) -> int:
     load_config()
     db.init_db()
     try:
@@ -77,22 +77,22 @@ async def _cmd_get(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _cmd_auth(args: argparse.Namespace) -> int:
+async def cmd_auth(args: argparse.Namespace) -> int:
     load_config()
     db.init_db()
     try:
         if args.status:
-            return _auth_status()
+            return auth_status()
         if args.reset:
             plex.clear_auth()
             print("Cleared stored Plex credentials.")
             return 0
-        return await _auth_link()
+        return await auth_link()
     finally:
         db.close_db()
 
 
-def _auth_status() -> int:
+def auth_status() -> int:
     try:
         token, url, name = plex.load_auth()
     except plex.PlexNotLinkedError as exc:
@@ -103,7 +103,7 @@ def _auth_status() -> int:
     return 0
 
 
-async def _auth_link() -> int:
+async def auth_link() -> int:
     client_id = plex.get_or_create_client_id()
     pin = await plex.create_pin(client_id)
     print("Open this URL in a browser and click Allow:")
@@ -133,19 +133,19 @@ def main(argv: list[str] | None = None) -> int:
 
     p_probe = sub.add_parser("probe", help="probe a file; print JSON; no DB writes")
     p_probe.add_argument("path")
-    p_probe.set_defaults(func=_cmd_probe)
+    p_probe.set_defaults(func=cmd_probe)
 
     p_scan = sub.add_parser("scan", help="run one full-scan pass and exit")
-    p_scan.set_defaults(func=_cmd_scan)
+    p_scan.set_defaults(func=cmd_scan)
 
     p_get = sub.add_parser("get", help="print the DB row for PATH")
     p_get.add_argument("path")
-    p_get.set_defaults(func=_cmd_get)
+    p_get.set_defaults(func=cmd_get)
 
     p_auth = sub.add_parser("auth", help="link to a Plex account via PIN OAuth")
     p_auth.add_argument("--status", action="store_true", help="show link state")
     p_auth.add_argument("--reset", action="store_true", help="forget stored token")
-    p_auth.set_defaults(func=_cmd_auth)
+    p_auth.set_defaults(func=cmd_auth)
 
     args = parser.parse_args(argv)
     return asyncio.run(args.func(args))

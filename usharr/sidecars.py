@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 SIDECAR_EXTENSIONS = frozenset({".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt"})
 
-_SUB_CODEC_BY_EXT = {
+SUB_CODEC_BY_EXT = {
     ".srt": "SRT",
     ".ass": "ASS",
     ".ssa": "SSA",
@@ -20,8 +20,8 @@ _SUB_CODEC_BY_EXT = {
 }
 
 # Filename tail tokens that flag the sub rather than naming its language.
-_FORCED_TOKENS = {"forced"}
-_SDH_TOKENS = {"sdh", "hi", "cc"}
+FORCED_TOKENS = {"forced"}
+SDH_TOKENS = {"sdh", "hi", "cc"}
 
 
 def find_sidecars(video_path: Path) -> list[Path]:
@@ -62,7 +62,7 @@ def mtime_ns_max(paths: list[Path]) -> int | None:
 def parse_sidecar(video_stem: str, sidecar: Path, idx: int) -> SubtitleTrackRow:
     """Produce a subtitle_track row for a sidecar file."""
     suffix = sidecar.suffix.lower()
-    codec = _SUB_CODEC_BY_EXT.get(suffix, suffix.lstrip(".").upper())
+    codec = SUB_CODEC_BY_EXT.get(suffix, suffix.lstrip(".").upper())
 
     tail = sidecar.name.removeprefix(video_stem)
     tail = tail.removesuffix(sidecar.suffix)
@@ -74,10 +74,10 @@ def parse_sidecar(video_stem: str, sidecar: Path, idx: int) -> SubtitleTrackRow:
     sdh = False
     for tok in tokens:
         tl = tok.lower()
-        if tl in _FORCED_TOKENS:
+        if tl in FORCED_TOKENS:
             forced = True
             continue
-        if tl in _SDH_TOKENS:
+        if tl in SDH_TOKENS:
             sdh = True
             continue
         if lang is None:

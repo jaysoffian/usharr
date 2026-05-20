@@ -17,11 +17,11 @@ from usharr.config import INTERVAL_SECONDS, Config
 logger = logging.getLogger(__name__)
 
 
-class _Model(BaseModel):
+class Model(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
-class _Series(_Model):
+class Series(Model):
     id: int
     tvdb_id: int | None = Field(default=None, alias="tvdbId")
     title_slug: str = Field(default="", alias="titleSlug")
@@ -29,10 +29,10 @@ class _Series(_Model):
     path: str = ""  # series folder
 
 
-_SERIES_ADAPTER: TypeAdapter[list[_Series]] = TypeAdapter(list[_Series])
+SERIES_ADAPTER: TypeAdapter[list[Series]] = TypeAdapter(list[Series])
 
 
-async def _get_series(base: str, api_key: str) -> list[_Series]:
+async def get_series(base: str, api_key: str) -> list[Series]:
     url = f"{base.rstrip('/')}/api/v3/series"
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         r = await client.get(url, headers={"X-Api-Key": api_key})
@@ -40,7 +40,7 @@ async def _get_series(base: str, api_key: str) -> list[_Series]:
         msg = f"GET {url} → {r.status_code}"
         raise RuntimeError(msg)
     try:
-        return _SERIES_ADAPTER.validate_json(r.content)
+        return SERIES_ADAPTER.validate_json(r.content)
     except ValidationError as exc:
         msg = f"bad sonarr response: {exc}"
         raise RuntimeError(msg) from exc
@@ -53,7 +53,7 @@ async def sync_once(config: Config) -> dict:
         return {"skipped": True}
 
     try:
-        series = await _get_series(s.url, s.api_key)
+        series = await get_series(s.url, s.api_key)
     except Exception as exc:
         logger.warning("sonarr_sync: fetch failed: %s", exc)
         return {"error": str(exc)}

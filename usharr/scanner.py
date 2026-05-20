@@ -20,18 +20,18 @@ VIDEO_EXTENSIONS = frozenset(
 # At most one probe runs at a time. scan_loop and the webhook probe_worker
 # both go through probe_and_store, which acquires this lock for the
 # ffmpeg/mediainfo pass.
-_probe_lock = asyncio.Lock()
+probe_lock = asyncio.Lock()
 
 # Serializes full_scan. Without this, scan_loop's periodic pass and a
 # manual trigger (Refresh / Analyze) interleave at every await point in
 # probe_and_store — files arrive out of order and each gets probed once
 # per concurrent scan.
-_scan_lock = asyncio.Lock()
+scan_lock = asyncio.Lock()
 
 # Bounded queue fed by webhook PUTs; drained by a single probe_worker task
 # started in app.lifespan. Tuple: (path, force, force_mediainfo).
-_QUEUE_MAX = 50
-_queue: asyncio.Queue[tuple[Path, bool, bool]] = asyncio.Queue(maxsize=_QUEUE_MAX)
+QUEUE_MAX = 50
+queue: asyncio.Queue[tuple[Path, bool, bool]] = asyncio.Queue(maxsize=QUEUE_MAX)
 
 
 def is_scanned(path: Path) -> bool:
@@ -66,7 +66,7 @@ def enqueue_probe(
 ) -> bool:
     """Non-blocking enqueue. Returns False if the queue is full."""
     try:
-        _queue.put_nowait((path, force, force_mediainfo))
+        queue.put_nowait((path, force, force_mediainfo))
     except asyncio.QueueFull:
         return False
     return True
@@ -75,7 +75,7 @@ def enqueue_probe(
 async def probe_worker(config: Config) -> None:
     """Drain the probe queue, serially. Cancel-safe."""
     while True:
-        path, force, force_mediainfo = await _queue.get()
+        path, force, force_mediainfo = await queue.get()
         try:
             await probe_and_store(
                 config,
@@ -88,7 +88,7 @@ async def probe_worker(config: Config) -> None:
         except Exception:
             logger.exception("queued probe failed for %s", path)
         finally:
-            _queue.task_done()
+            queue.task_done()
 
 
 def iter_video_files(paths: list[str]) -> list[Path]:
@@ -151,8 +151,8 @@ async def probe_and_store(
     # (covers both never-discovered and "stub" media_file rows from
     # full_scan's pre-pass). Users can `Redetect` per-title or
     # library-wide to retry persistent failures.
-    run_mediainfo = force or force_mediainfo or not video_unchanged or mi_row is None
-    run_ardetector = force or not video_unchanged or ar_row is None
+    do_mediainfo = force or force_mediainfo or not video_unchanged or mi_row is None
+    do_ardetector = force or not video_unchanged or ar_row is None
 
     # Make sure media_file is current before we touch the per-pass tables
     # (the FKs require it). New file → insert; changed file → refresh
@@ -174,10 +174,10 @@ async def probe_and_store(
             sidecars_mtime_ns=sidecar_mtime,
         )
 
-    if not run_mediainfo and not run_ardetector and sidecars_unchanged:
+    if not do_mediainfo and not do_ardetector and sidecars_unchanged:
         return db.get(str(path)), False
 
-    if not run_mediainfo and not run_ardetector:
+    if not do_mediainfo and not do_ardetector:
         start_idx = db.count_internal_subs(str(path))
         external_subs = [
             sidecars.parse_sidecar(path.stem, s, start_idx + i)
@@ -194,15 +194,15 @@ async def probe_and_store(
     logger.info(
         "probe %s: mediainfo=%s ardetector=%s",
         path,
-        run_mediainfo,
-        run_ardetector,
+        do_mediainfo,
+        do_ardetector,
     )
 
-    async with _probe_lock:
-        if run_mediainfo:
-            await _run_mediainfo(path, mi_row, now)
-        if run_ardetector:
-            await _run_ardetector(path, now)
+    async with probe_lock:
+        if do_mediainfo:
+            await run_mediainfo(path, mi_row, now)
+        if do_ardetector:
+            await run_ardetector(path, now)
 
     # External sidecar subs always re-derived from disk so a sidecar
     # add/remove between probe passes still gets picked up. Keep them
@@ -218,7 +218,7 @@ async def probe_and_store(
     return db.get(str(path)), True
 
 
-async def _run_mediainfo(
+async def run_mediainfo(
     path: Path,
     cached: db.MediainfoRow | None,
     now: int,
@@ -275,7 +275,7 @@ async def _run_mediainfo(
     )
 
 
-async def _run_ardetector(path: Path, now: int) -> None:
+async def run_ardetector(path: Path, now: int) -> None:
     """Run ardetector and upsert its row. On failure, record the error;
     we don't try to preserve old aspect data (a re-run failure on the
     same bytes would be the same outcome the user already has).
@@ -320,9 +320,9 @@ async def full_scan(
     frames). ``force_mediainfo`` re-reads track metadata but preserves
     cached AR data (fast).
     """
-    if _scan_lock.locked():
+    if scan_lock.locked():
         logger.info("full_scan waiting for in-flight scan to finish")
-    async with _scan_lock:
+    async with scan_lock:
         paths = config.all_paths
         logger.info(
             "Starting full scan across %d path(s) force=%s force_mediainfo=%s",

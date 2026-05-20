@@ -14,8 +14,8 @@ CONFIG_PATH = Path(os.environ.get("USHARR_CONFIG", "config.yaml"))
 # How often background loops (scan + sync) wake up to run another pass.
 INTERVAL_SECONDS = 3600
 
-_yaml = YAML()
-_yaml.preserve_quotes = True
+yaml = YAML()
+yaml.preserve_quotes = True
 
 SEED_CONFIG = """\
 library:
@@ -130,7 +130,7 @@ def load_config(path: Path | None = None) -> Config:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(SEED_CONFIG)
 
-    raw = _yaml.load(config_path) or {}
+    raw = yaml.load(config_path) or {}
     library_raw = raw.get("library") or {}
     plex_raw = raw.get("plex") or {}
     tautulli_raw = raw.get("tautulli") or {}

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 DB_PATH = Path(os.environ.get("USHARR_DB", "/config/usharr.db"))
 DB_DIR = DB_PATH.parent
 
-_db: sqlite3.Connection | None = None
+db: sqlite3.Connection | None = None
 
 
 CREATE_TABLES = """
@@ -169,7 +169,7 @@ CREATE INDEX IF NOT EXISTS sonarr_series_local_folder ON sonarr_series(local_fol
 # Bump when mediainfo extraction gains fields so existing rows get re-probed
 # on next scan. Aspect data, sidecar subs, and plex_item/bazarr_* rows are
 # preserved — only the mediainfo pass reruns.
-_MEDIAINFO_SCHEMA_VERSION = 7
+MEDIAINFO_SCHEMA_VERSION = 7
 
 
 # --- typed row containers -------------------------------------------------
@@ -298,7 +298,7 @@ class LibraryRow:
     plex_updated_at: int | None
 
 
-def _row[T](
+def make_row[T](
     cls: type[T],
     cols: tuple[str, ...],
     row: tuple,
@@ -312,15 +312,15 @@ def _row[T](
 
 
 def init_db() -> None:
-    global _db  # noqa: PLW0603
-    if _db is not None:
+    global db  # noqa: PLW0603
+    if db is not None:
         return
     # USHARR_DB_RO implies `make dev` against a copied prod DB. Open the
     # SQLite file read-only so a stray menu click (or any other write
     # path) can't clobber the snapshot — failure surfaces at the DB
     # layer regardless of which endpoint tried to mutate.
     if os.environ.get("USHARR_DB_RO"):
-        _db = sqlite3.connect(
+        db = sqlite3.connect(
             f"file:{DB_PATH}?mode=ro",
             uri=True,
             isolation_level=None,
@@ -329,63 +329,63 @@ def init_db() -> None:
         logger.info("Opened DB at %s (read-only)", DB_PATH)
         return
     DB_DIR.mkdir(parents=True, exist_ok=True)
-    _db = sqlite3.connect(
+    db = sqlite3.connect(
         str(DB_PATH),
         isolation_level=None,
         check_same_thread=False,
     )
-    _db.execute("PRAGMA journal_mode=WAL")
-    _db.execute("PRAGMA synchronous=NORMAL")
-    _db.execute("PRAGMA foreign_keys=ON")
-    _db.executescript(CREATE_TABLES)
-    _db.executescript(CREATE_INDEXES)
-    _maybe_reprobe_on_schema_bump()
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA synchronous=NORMAL")
+    db.execute("PRAGMA foreign_keys=ON")
+    db.executescript(CREATE_TABLES)
+    db.executescript(CREATE_INDEXES)
+    maybe_reprobe_on_schema_bump()
     logger.info("Opened DB at %s", DB_PATH)
 
 
-def _maybe_reprobe_on_schema_bump() -> None:
+def maybe_reprobe_on_schema_bump() -> None:
     """On mediainfo schema bumps, drop every `mediainfo` row so the next
     scan re-probes track metadata. `ardetector` rows (slow ffmpeg pass)
     and audio_track / subtitle_track rows are untouched — the next
     probe rebuilds those alongside the new mediainfo row.
     """
-    stored = kv_get("_mediainfo_schema_version") or "0"
+    stored = kv_get("mediainfo_schema_version") or "0"
     try:
         last = int(stored)
     except ValueError:
         last = 0
-    if last >= _MEDIAINFO_SCHEMA_VERSION:
+    if last >= MEDIAINFO_SCHEMA_VERSION:
         return
-    conn = _conn()
+    conn = get_conn()
     n = conn.execute("DELETE FROM mediainfo").rowcount or 0
     if n:
         logger.info(
             "mediainfo schema v%d → v%d: dropped %d row(s) for re-probe",
             last,
-            _MEDIAINFO_SCHEMA_VERSION,
+            MEDIAINFO_SCHEMA_VERSION,
             n,
         )
-    kv_set("_mediainfo_schema_version", str(_MEDIAINFO_SCHEMA_VERSION))
+    kv_set("mediainfo_schema_version", str(MEDIAINFO_SCHEMA_VERSION))
 
 
 def close_db() -> None:
-    global _db  # noqa: PLW0603
-    if _db is not None:
-        _db.close()
-        _db = None
+    global db  # noqa: PLW0603
+    if db is not None:
+        db.close()
+        db = None
 
 
-def _conn() -> sqlite3.Connection:
-    if _db is None:
+def get_conn() -> sqlite3.Connection:
+    if db is None:
         msg = "db.init_db() has not been called"
         raise RuntimeError(msg)
-    return _db
+    return db
 
 
 # --- path mapping ---------------------------------------------------------
 
 
-def _map_remote_path(remote: str, path_map: dict[str, str]) -> str:
+def map_remote_path(remote: str, path_map: dict[str, str]) -> str:
     """Rewrite a remote path to local using a {local: remote} prefix map.
 
     Returns the input unchanged when no prefix matches — fine for setups
@@ -399,19 +399,19 @@ def _map_remote_path(remote: str, path_map: dict[str, str]) -> str:
     return remote
 
 
-def _file_exists(p: str) -> bool:
+def file_exists(p: str) -> bool:
     return (
-        _conn()
+        get_conn()
         .execute("SELECT 1 FROM media_file WHERE path = ? LIMIT 1", (p,))
         .fetchone()
         is not None
     )
 
 
-def _folder_has_files(p: str) -> bool:
-    like = _like_prefix(p.rstrip("/") + "/")
+def folder_has_files(p: str) -> bool:
+    like = like_prefix(p.rstrip("/") + "/")
     return (
-        _conn()
+        get_conn()
         .execute(
             "SELECT 1 FROM media_file WHERE path LIKE ? ESCAPE '\\' LIMIT 1",
             (like,),
@@ -421,29 +421,27 @@ def _folder_has_files(p: str) -> bool:
     )
 
 
-def _resolve_local_file(
-    remote_path: str | None, path_map: dict[str, str]
-) -> str | None:
+def resolve_local_file(remote_path: str | None, path_map: dict[str, str]) -> str | None:
     """Map a remote file path to local; None if it doesn't match a media_file row."""
     if not remote_path:
         return None
-    mapped = _map_remote_path(remote_path, path_map)
-    return mapped if _file_exists(mapped) else None
+    mapped = map_remote_path(remote_path, path_map)
+    return mapped if file_exists(mapped) else None
 
 
-def _resolve_local_folder(
+def resolve_local_folder(
     remote_path: str | None, path_map: dict[str, str]
 ) -> str | None:
     """Map a remote folder path to local; None if no media_file row sits under it."""
     if not remote_path:
         return None
-    mapped = _map_remote_path(remote_path, path_map)
-    return mapped if _folder_has_files(mapped) else None
+    mapped = map_remote_path(remote_path, path_map)
+    return mapped if folder_has_files(mapped) else None
 
 
 # --- media_file -----------------------------------------------------------
 
-_MEDIA_COLS = (
+MEDIA_COLS = (
     "path",
     "size_bytes",
     "mtime_ns",
@@ -453,20 +451,20 @@ _MEDIA_COLS = (
 
 
 def get(path: str) -> MediaFileRow | None:
-    cols = ", ".join(_MEDIA_COLS)
+    cols = ", ".join(MEDIA_COLS)
     row = (
-        _conn()
+        get_conn()
         .execute(f"SELECT {cols} FROM media_file WHERE path = ?", (path,))
         .fetchone()
     )
     if row is None:
         return None
-    return _row(MediaFileRow, _MEDIA_COLS, row)
+    return make_row(MediaFileRow, MEDIA_COLS, row)
 
 
 def get_by_remote_path(remote: str, path_map: dict[str, str]) -> MediaFileRow | None:
     """Map a remote path to local and return the matching media_file row."""
-    return get(_map_remote_path(remote, path_map))
+    return get(map_remote_path(remote, path_map))
 
 
 def insert_media_file(
@@ -482,7 +480,7 @@ def insert_media_file(
     A row's existence means "we've seen this file"; the mediainfo /
     ardetector tables fill in later.
     """
-    cur = _conn().execute(
+    cur = get_conn().execute(
         "INSERT OR IGNORE INTO media_file"
         " (path, size_bytes, mtime_ns, sidecars_mtime_ns, discovered_at)"
         " VALUES (?, ?, ?, ?, ?)",
@@ -499,7 +497,7 @@ def update_media_file_stat(
     sidecars_mtime_ns: int | None,
 ) -> None:
     """Refresh the discovery-side stat fields after a file change."""
-    _conn().execute(
+    get_conn().execute(
         "UPDATE media_file"
         " SET size_bytes = ?, mtime_ns = ?, sidecars_mtime_ns = ?"
         " WHERE path = ?",
@@ -509,7 +507,7 @@ def update_media_file_stat(
 
 # --- mediainfo ------------------------------------------------------------
 
-_MEDIAINFO_COLS = (
+MEDIAINFO_COLS = (
     "path",
     "probed_at",
     "error",
@@ -529,15 +527,15 @@ _MEDIAINFO_COLS = (
 
 
 def get_mediainfo(path: str) -> MediainfoRow | None:
-    cols = ", ".join(_MEDIAINFO_COLS)
+    cols = ", ".join(MEDIAINFO_COLS)
     row = (
-        _conn()
+        get_conn()
         .execute(f"SELECT {cols} FROM mediainfo WHERE path = ?", (path,))
         .fetchone()
     )
     if row is None:
         return None
-    return _row(MediainfoRow, _MEDIAINFO_COLS, row)
+    return make_row(MediainfoRow, MEDIAINFO_COLS, row)
 
 
 def upsert_mediainfo(
@@ -570,8 +568,8 @@ def upsert_mediainfo(
     External subtitles aren't touched by this function — they live or
     die with the sidecar files (see ``update_external_subtitles``).
     """
-    placeholders = ", ".join("?" * len(_MEDIAINFO_COLS))
-    cols = ", ".join(_MEDIAINFO_COLS)
+    placeholders = ", ".join("?" * len(MEDIAINFO_COLS))
+    cols = ", ".join(MEDIAINFO_COLS)
     values = (
         path,
         probed_at,
@@ -589,7 +587,7 @@ def upsert_mediainfo(
         video_bit_rate,
         video_max_bit_rate,
     )
-    conn = _conn()
+    conn = get_conn()
     conn.execute("BEGIN")
     try:
         conn.execute(
@@ -660,7 +658,7 @@ def set_mediainfo_duration(path: str, duration: float) -> None:
     didn't get one (the AR sampler measures runtime as a side effect).
     No-op if no mediainfo row exists for `path`.
     """
-    _conn().execute(
+    get_conn().execute(
         "UPDATE mediainfo SET duration = ? WHERE path = ? AND duration IS NULL",
         (duration, path),
     )
@@ -668,7 +666,7 @@ def set_mediainfo_duration(path: str, duration: float) -> None:
 
 # --- ardetector -----------------------------------------------------------
 
-_ARDETECTOR_COLS = (
+ARDETECTOR_COLS = (
     "path",
     "probed_at",
     "error",
@@ -679,15 +677,15 @@ _ARDETECTOR_COLS = (
 
 
 def get_ardetector(path: str) -> ArdetectorRow | None:
-    cols = ", ".join(_ARDETECTOR_COLS)
+    cols = ", ".join(ARDETECTOR_COLS)
     row = (
-        _conn()
+        get_conn()
         .execute(f"SELECT {cols} FROM ardetector WHERE path = ?", (path,))
         .fetchone()
     )
     if row is None:
         return None
-    return _row(ArdetectorRow, _ARDETECTOR_COLS, row)
+    return make_row(ArdetectorRow, ARDETECTOR_COLS, row)
 
 
 def upsert_ardetector(
@@ -699,9 +697,9 @@ def upsert_ardetector(
     aspect_widest: float | None,
     aspect_samples: str | None,
 ) -> None:
-    cols = ", ".join(_ARDETECTOR_COLS)
-    placeholders = ", ".join("?" * len(_ARDETECTOR_COLS))
-    _conn().execute(
+    cols = ", ".join(ARDETECTOR_COLS)
+    placeholders = ", ".join("?" * len(ARDETECTOR_COLS))
+    get_conn().execute(
         f"INSERT OR REPLACE INTO ardetector ({cols}) VALUES ({placeholders})",
         (
             path,
@@ -714,7 +712,7 @@ def upsert_ardetector(
     )
 
 
-_AUDIO_COLS = (
+AUDIO_COLS = (
     "idx",
     "codec",
     "channels",
@@ -731,9 +729,9 @@ _AUDIO_COLS = (
     "bit_depth",
     "compression_mode",
 )
-_AUDIO_BOOLS = ("is_default", "is_forced")
+AUDIO_BOOLS = ("is_default", "is_forced")
 
-_SUBTITLE_COLS = (
+SUBTITLE_COLS = (
     "idx",
     "source",
     "file_path",
@@ -744,26 +742,28 @@ _SUBTITLE_COLS = (
     "is_forced",
     "is_sdh",
 )
-_SUBTITLE_BOOLS = ("is_default", "is_forced", "is_sdh")
+SUBTITLE_BOOLS = ("is_default", "is_forced", "is_sdh")
 
 
 def get_audio_tracks(path: str) -> list[AudioTrackRow]:
-    cols = ", ".join(_AUDIO_COLS)
+    cols = ", ".join(AUDIO_COLS)
     rows = (
-        _conn()
+        get_conn()
         .execute(
             f"SELECT {cols} FROM audio_track WHERE path = ? ORDER BY idx",
             (path,),
         )
         .fetchall()
     )
-    return [_row(AudioTrackRow, _AUDIO_COLS, r, bool_fields=_AUDIO_BOOLS) for r in rows]
+    return [
+        make_row(AudioTrackRow, AUDIO_COLS, r, bool_fields=AUDIO_BOOLS) for r in rows
+    ]
 
 
 def get_subtitle_tracks(path: str) -> list[SubtitleTrackRow]:
-    cols = ", ".join(_SUBTITLE_COLS)
+    cols = ", ".join(SUBTITLE_COLS)
     rows = (
-        _conn()
+        get_conn()
         .execute(
             f"SELECT {cols} FROM subtitle_track WHERE path = ? ORDER BY idx",
             (path,),
@@ -771,14 +771,14 @@ def get_subtitle_tracks(path: str) -> list[SubtitleTrackRow]:
         .fetchall()
     )
     return [
-        _row(SubtitleTrackRow, _SUBTITLE_COLS, r, bool_fields=_SUBTITLE_BOOLS)
+        make_row(SubtitleTrackRow, SUBTITLE_COLS, r, bool_fields=SUBTITLE_BOOLS)
         for r in rows
     ]
 
 
 def count_internal_subs(path: str) -> int:
     row = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT COUNT(*) FROM subtitle_track"
             " WHERE path = ? AND source = 'internal'",
@@ -800,7 +800,7 @@ def update_external_subtitles(
     in sync via ``update_media_file_stat`` / ``insert_media_file`` —
     discovery state lives on the discovery row.
     """
-    conn = _conn()
+    conn = get_conn()
     conn.execute("BEGIN")
     try:
         conn.execute(
@@ -833,7 +833,7 @@ def update_external_subtitles(
 
 
 def list_paths() -> set[str]:
-    return {row[0] for row in _conn().execute("SELECT path FROM media_file")}
+    return {row[0] for row in get_conn().execute("SELECT path FROM media_file")}
 
 
 def library_rows(path_prefix: str) -> list[LibraryRow]:
@@ -845,24 +845,24 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
     included here; fetch via ``get_audio_tracks(path)`` /
     ``get_subtitle_tracks(path)`` as needed.
     """
-    media_cols = ", ".join(f"m.{c}" for c in _MEDIA_COLS)
+    media_cols = ", ".join(f"m.{c}" for c in MEDIA_COLS)
     # mediainfo: skip the duplicate `path` column; alias `probed_at` /
     # `error` so they don't collide with the ardetector versions.
-    mi_data = tuple(c for c in _MEDIAINFO_COLS if c != "path")
+    mi_data = tuple(c for c in MEDIAINFO_COLS if c != "path")
     mi_select = ", ".join(
         f"mi.{c} AS mediainfo_{c}" if c in {"probed_at", "error"} else f"mi.{c}"
         for c in mi_data
     )
-    ar_data = tuple(c for c in _ARDETECTOR_COLS if c != "path")
+    ar_data = tuple(c for c in ARDETECTOR_COLS if c != "path")
     ar_select = ", ".join(
         f"ar.{c} AS ardetector_{c}" if c in {"probed_at", "error"} else f"ar.{c}"
         for c in ar_data
     )
     plex_cols = ", ".join(
-        f"p.{c} AS plex_{c}" for c in _PLEX_ITEM_COLS if c not in {"path", "local_path"}
+        f"p.{c} AS plex_{c}" for c in PLEX_ITEM_COLS if c not in {"path", "local_path"}
     )
     rows = (
-        _conn()
+        get_conn()
         .execute(
             f"SELECT {media_cols}, {mi_select}, {ar_select}, {plex_cols}"
             " FROM media_file m"
@@ -871,7 +871,7 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
             " LEFT JOIN plex_item   p ON p.local_path = m.path"
             " WHERE m.path LIKE ? ESCAPE '\\'"
             " ORDER BY m.path",
-            (_like_prefix(path_prefix),),
+            (like_prefix(path_prefix),),
         )
         .fetchall()
     )
@@ -882,21 +882,21 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
         f"ardetector_{c}" if c in {"probed_at", "error"} else c for c in ar_data
     )
     plex_names = tuple(
-        f"plex_{c}" for c in _PLEX_ITEM_COLS if c not in {"path", "local_path"}
+        f"plex_{c}" for c in PLEX_ITEM_COLS if c not in {"path", "local_path"}
     )
-    col_names = (*_MEDIA_COLS, *mi_names, *ar_names, *plex_names)
-    return [_row(LibraryRow, col_names, r) for r in rows]
+    col_names = (*MEDIA_COLS, *mi_names, *ar_names, *plex_names)
+    return [make_row(LibraryRow, col_names, r) for r in rows]
 
 
-def _like_prefix(p: str) -> str:
+def like_prefix(p: str) -> str:
     return p.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
 def library_paths(path_prefix: str) -> list[str]:
     """Every media_file.path under the library, sorted. Caller may filter."""
-    like = _like_prefix(path_prefix)
+    like = like_prefix(path_prefix)
     rows = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT path FROM media_file WHERE path LIKE ? ESCAPE '\\' ORDER BY path",
             (like,),
@@ -910,11 +910,11 @@ def library_tracks(
     path_prefix: str,
 ) -> tuple[dict[str, list[AudioTrackRow]], dict[str, list[SubtitleTrackRow]]]:
     """Return (audio_by_path, subtitle_by_path) for every file under prefix."""
-    conn = _conn()
+    conn = get_conn()
     audio: dict[str, list[AudioTrackRow]] = {}
     subtitle: dict[str, list[SubtitleTrackRow]] = {}
-    like = _like_prefix(path_prefix)
-    audio_cols = ", ".join(_AUDIO_COLS)
+    like = like_prefix(path_prefix)
+    audio_cols = ", ".join(AUDIO_COLS)
     for row in conn.execute(
         f"SELECT path, {audio_cols}"
         " FROM audio_track WHERE path LIKE ? ESCAPE '\\'"
@@ -922,9 +922,9 @@ def library_tracks(
         (like,),
     ):
         audio.setdefault(row[0], []).append(
-            _row(AudioTrackRow, _AUDIO_COLS, row[1:], bool_fields=_AUDIO_BOOLS)
+            make_row(AudioTrackRow, AUDIO_COLS, row[1:], bool_fields=AUDIO_BOOLS)
         )
-    subtitle_cols = ", ".join(_SUBTITLE_COLS)
+    subtitle_cols = ", ".join(SUBTITLE_COLS)
     for row in conn.execute(
         f"SELECT path, {subtitle_cols}"
         " FROM subtitle_track WHERE path LIKE ? ESCAPE '\\'"
@@ -932,7 +932,9 @@ def library_tracks(
         (like,),
     ):
         subtitle.setdefault(row[0], []).append(
-            _row(SubtitleTrackRow, _SUBTITLE_COLS, row[1:], bool_fields=_SUBTITLE_BOOLS)
+            make_row(
+                SubtitleTrackRow, SUBTITLE_COLS, row[1:], bool_fields=SUBTITLE_BOOLS
+            )
         )
     return audio, subtitle
 
@@ -940,7 +942,7 @@ def library_tracks(
 def delete_paths(paths: list[str]) -> int:
     if not paths:
         return 0
-    conn = _conn()
+    conn = get_conn()
     total = 0
     for i in range(0, len(paths), 500):
         chunk = paths[i : i + 500]
@@ -955,7 +957,7 @@ def delete_paths(paths: list[str]) -> int:
 
 # --- plex_item ------------------------------------------------------------
 
-_PLEX_ITEM_COLS = (
+PLEX_ITEM_COLS = (
     "rating_key",
     "type",
     "title",
@@ -982,10 +984,10 @@ def upsert_plex_item(
     remote_path: str | None = None,
 ) -> str | None:
     """Upsert a plex_item. Returns the resolved local_path (or None)."""
-    local_path = _resolve_local_file(remote_path, path_map)
-    cols = ", ".join(_PLEX_ITEM_COLS)
-    placeholders = ", ".join("?" * len(_PLEX_ITEM_COLS))
-    _conn().execute(
+    local_path = resolve_local_file(remote_path, path_map)
+    cols = ", ".join(PLEX_ITEM_COLS)
+    placeholders = ", ".join("?" * len(PLEX_ITEM_COLS))
+    get_conn().execute(
         f"INSERT OR REPLACE INTO plex_item ({cols}) VALUES ({placeholders})",
         (
             rating_key,
@@ -1003,9 +1005,9 @@ def upsert_plex_item(
 
 
 def get_plex_item_by_local_path(local_path: str) -> PlexItemRow | None:
-    cols = ", ".join(_PLEX_ITEM_COLS)
+    cols = ", ".join(PLEX_ITEM_COLS)
     row = (
-        _conn()
+        get_conn()
         .execute(
             f"SELECT {cols} FROM plex_item WHERE local_path = ? LIMIT 1",
             (local_path,),
@@ -1014,13 +1016,13 @@ def get_plex_item_by_local_path(local_path: str) -> PlexItemRow | None:
     )
     if row is None:
         return None
-    return _row(PlexItemRow, _PLEX_ITEM_COLS, row)
+    return make_row(PlexItemRow, PLEX_ITEM_COLS, row)
 
 
 def get_plex_item(rating_key: str) -> PlexItemRow | None:
-    cols = ", ".join(_PLEX_ITEM_COLS)
+    cols = ", ".join(PLEX_ITEM_COLS)
     row = (
-        _conn()
+        get_conn()
         .execute(
             f"SELECT {cols} FROM plex_item WHERE rating_key = ?",
             (rating_key,),
@@ -1029,17 +1031,17 @@ def get_plex_item(rating_key: str) -> PlexItemRow | None:
     )
     if row is None:
         return None
-    return _row(PlexItemRow, _PLEX_ITEM_COLS, row)
+    return make_row(PlexItemRow, PLEX_ITEM_COLS, row)
 
 
 def list_plex_rating_keys() -> set[str]:
-    return {row[0] for row in _conn().execute("SELECT rating_key FROM plex_item")}
+    return {row[0] for row in get_conn().execute("SELECT rating_key FROM plex_item")}
 
 
 def delete_plex_rating_keys(keys: list[str]) -> int:
     if not keys:
         return 0
-    conn = _conn()
+    conn = get_conn()
     total = 0
     for i in range(0, len(keys), 500):
         chunk = keys[i : i + 500]
@@ -1064,8 +1066,8 @@ def upsert_bazarr_movie(
     year: int | None = None,
     remote_path: str | None = None,
 ) -> None:
-    local_path = _resolve_local_file(remote_path, path_map)
-    _conn().execute(
+    local_path = resolve_local_file(remote_path, path_map)
+    get_conn().execute(
         "INSERT OR REPLACE INTO bazarr_movie"
         " (radarr_id, title, year, local_path, updated_at)"
         " VALUES (?,?,?,?,?)",
@@ -1081,8 +1083,8 @@ def upsert_bazarr_series(
     title: str | None = None,
     remote_path: str | None = None,
 ) -> None:
-    local_folder = _resolve_local_folder(remote_path, path_map)
-    _conn().execute(
+    local_folder = resolve_local_folder(remote_path, path_map)
+    get_conn().execute(
         "INSERT OR REPLACE INTO bazarr_series"
         " (sonarr_id, title, local_folder, updated_at)"
         " VALUES (?,?,?,?)",
@@ -1091,25 +1093,25 @@ def upsert_bazarr_series(
 
 
 def list_bazarr_movie_ids() -> set[int]:
-    return {row[0] for row in _conn().execute("SELECT radarr_id FROM bazarr_movie")}
+    return {row[0] for row in get_conn().execute("SELECT radarr_id FROM bazarr_movie")}
 
 
 def list_bazarr_series_ids() -> set[int]:
-    return {row[0] for row in _conn().execute("SELECT sonarr_id FROM bazarr_series")}
+    return {row[0] for row in get_conn().execute("SELECT sonarr_id FROM bazarr_series")}
 
 
 def delete_bazarr_movies(ids: list[int]) -> int:
-    return _bulk_delete("bazarr_movie", "radarr_id", ids)
+    return bulk_delete("bazarr_movie", "radarr_id", ids)
 
 
 def delete_bazarr_series(ids: list[int]) -> int:
-    return _bulk_delete("bazarr_series", "sonarr_id", ids)
+    return bulk_delete("bazarr_series", "sonarr_id", ids)
 
 
-def _bulk_delete(table: str, col: str, ids: list) -> int:
+def bulk_delete(table: str, col: str, ids: list) -> int:
     if not ids:
         return 0
-    conn = _conn()
+    conn = get_conn()
     total = 0
     for i in range(0, len(ids), 500):
         chunk = ids[i : i + 500]
@@ -1124,7 +1126,7 @@ def _bulk_delete(table: str, col: str, ids: list) -> int:
 
 def bazarr_movie_for_local_path(local_path: str) -> int | None:
     row = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT radarr_id FROM bazarr_movie WHERE local_path = ? LIMIT 1",
             (local_path,),
@@ -1136,7 +1138,7 @@ def bazarr_movie_for_local_path(local_path: str) -> int | None:
 
 def bazarr_series_for_local_path(local_path: str) -> int | None:
     row = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT sonarr_id FROM bazarr_series"
             " WHERE local_folder IS NOT NULL AND ? LIKE local_folder || '/%'"
@@ -1161,8 +1163,8 @@ def upsert_radarr_movie(
     year: int | None = None,
     remote_path: str | None = None,
 ) -> None:
-    local_path = _resolve_local_file(remote_path, path_map)
-    _conn().execute(
+    local_path = resolve_local_file(remote_path, path_map)
+    get_conn().execute(
         "INSERT OR REPLACE INTO radarr_movie"
         " (movie_id, tmdb_id, title, year, local_path, updated_at)"
         " VALUES (?,?,?,?,?,?)",
@@ -1171,16 +1173,16 @@ def upsert_radarr_movie(
 
 
 def list_radarr_movie_ids() -> set[int]:
-    return {row[0] for row in _conn().execute("SELECT movie_id FROM radarr_movie")}
+    return {row[0] for row in get_conn().execute("SELECT movie_id FROM radarr_movie")}
 
 
 def delete_radarr_movies(ids: list[int]) -> int:
-    return _bulk_delete("radarr_movie", "movie_id", ids)
+    return bulk_delete("radarr_movie", "movie_id", ids)
 
 
 def radarr_tmdb_for_local_path(local_path: str) -> int | None:
     row = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT tmdb_id FROM radarr_movie"
             " WHERE local_path = ? AND tmdb_id IS NOT NULL LIMIT 1",
@@ -1204,8 +1206,8 @@ def upsert_sonarr_series(
     title: str | None = None,
     remote_path: str | None = None,
 ) -> None:
-    local_folder = _resolve_local_folder(remote_path, path_map)
-    _conn().execute(
+    local_folder = resolve_local_folder(remote_path, path_map)
+    get_conn().execute(
         "INSERT OR REPLACE INTO sonarr_series"
         " (series_id, tvdb_id, title_slug, title, local_folder, updated_at)"
         " VALUES (?,?,?,?,?,?)",
@@ -1214,16 +1216,16 @@ def upsert_sonarr_series(
 
 
 def list_sonarr_series_ids() -> set[int]:
-    return {row[0] for row in _conn().execute("SELECT series_id FROM sonarr_series")}
+    return {row[0] for row in get_conn().execute("SELECT series_id FROM sonarr_series")}
 
 
 def delete_sonarr_series(ids: list[int]) -> int:
-    return _bulk_delete("sonarr_series", "series_id", ids)
+    return bulk_delete("sonarr_series", "series_id", ids)
 
 
 def all_bazarr_movies_by_local_path() -> dict[str, int]:
     rows = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT local_path, radarr_id FROM bazarr_movie"
             " WHERE local_path IS NOT NULL",
@@ -1235,7 +1237,7 @@ def all_bazarr_movies_by_local_path() -> dict[str, int]:
 
 def all_bazarr_series_by_local_folder() -> dict[str, int]:
     rows = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT local_folder, sonarr_id FROM bazarr_series"
             " WHERE local_folder IS NOT NULL",
@@ -1247,7 +1249,7 @@ def all_bazarr_series_by_local_folder() -> dict[str, int]:
 
 def all_radarr_movies_by_local_path() -> dict[str, int]:
     rows = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT local_path, tmdb_id FROM radarr_movie"
             " WHERE local_path IS NOT NULL AND tmdb_id IS NOT NULL",
@@ -1259,7 +1261,7 @@ def all_radarr_movies_by_local_path() -> dict[str, int]:
 
 def all_sonarr_series_by_local_folder() -> dict[str, str]:
     rows = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT local_folder, title_slug FROM sonarr_series"
             " WHERE local_folder IS NOT NULL AND title_slug IS NOT NULL",
@@ -1271,7 +1273,7 @@ def all_sonarr_series_by_local_folder() -> dict[str, str]:
 
 def sonarr_slug_for_local_path(local_path: str) -> str | None:
     row = (
-        _conn()
+        get_conn()
         .execute(
             "SELECT title_slug FROM sonarr_series"
             " WHERE local_folder IS NOT NULL AND ? LIKE local_folder || '/%'"
@@ -1288,15 +1290,15 @@ def sonarr_slug_for_local_path(local_path: str) -> str | None:
 
 
 def kv_get(key: str) -> str | None:
-    row = _conn().execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+    row = get_conn().execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
 
 
 def kv_set(key: str, value: str | None) -> None:
     if value is None:
-        _conn().execute("DELETE FROM kv WHERE key = ?", (key,))
+        get_conn().execute("DELETE FROM kv WHERE key = ?", (key,))
     else:
-        _conn().execute(
+        get_conn().execute(
             "INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
             (key, value),
         )

@@ -24,32 +24,32 @@ from usharr.config import INTERVAL_SECONDS, Config
 logger = logging.getLogger(__name__)
 
 
-class _Model(BaseModel):
+class Model(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
-class _BazMovie(_Model):
+class BazMovie(Model):
     radarr_id: int = Field(alias="radarrId")
     title: str = ""
     year: str | int | None = None
     path: str = ""
 
 
-class _BazSeries(_Model):
+class BazSeries(Model):
     sonarr_series_id: int = Field(alias="sonarrSeriesId")
     title: str = ""
     path: str = ""
 
 
-class _BazMoviesResp(_Model):
-    data: list[_BazMovie] = Field(default_factory=list)
+class BazMoviesResp(Model):
+    data: list[BazMovie] = Field(default_factory=list)
 
 
-class _BazSeriesResp(_Model):
-    data: list[_BazSeries] = Field(default_factory=list)
+class BazSeriesResp(Model):
+    data: list[BazSeries] = Field(default_factory=list)
 
 
-async def _get[T: _Model](model: type[T], base: str, path: str, api_key: str) -> T:
+async def get[T: Model](model: type[T], base: str, path: str, api_key: str) -> T:
     url = f"{base.rstrip('/')}{path}"
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(url, headers={"X-API-KEY": api_key})
@@ -63,7 +63,7 @@ async def _get[T: _Model](model: type[T], base: str, path: str, api_key: str) ->
         raise RuntimeError(msg) from exc
 
 
-def _year_to_int(year: str | int | None) -> int | None:
+def year_to_int(year: str | int | None) -> int | None:
     if year is None:
         return None
     if isinstance(year, int):
@@ -81,14 +81,14 @@ async def sync_once(config: Config) -> dict:
         return {"skipped": True}
 
     try:
-        movies_resp = await _get(
-            _BazMoviesResp,
+        movies_resp = await get(
+            BazMoviesResp,
             bz.url,
             "/api/movies?start=0&length=-1",
             bz.api_key,
         )
-        series_resp = await _get(
-            _BazSeriesResp,
+        series_resp = await get(
+            BazSeriesResp,
             bz.url,
             "/api/series?start=0&length=-1",
             bz.api_key,
@@ -105,7 +105,7 @@ async def sync_once(config: Config) -> dict:
         db.upsert_bazarr_movie(
             radarr_id=m.radarr_id,
             title=m.title or None,
-            year=_year_to_int(m.year),
+            year=year_to_int(m.year),
             remote_path=m.path or None,
             path_map=bz.path_map,
             updated_at=now,

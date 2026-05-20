@@ -24,11 +24,11 @@ PLEX_TV = "https://plex.tv"
 PRODUCT = "usharr"
 VERSION = "0.1.0"
 
-_K_CLIENT_ID = "plex_client_id"
-_K_TOKEN = "plex_token"
-_K_SERVER_URL = "plex_server_url"
-_K_SERVER_NAME = "plex_server_name"
-_K_MACHINE_ID = "plex_machine_id"
+K_CLIENT_ID = "plex_client_id"
+K_TOKEN = "plex_token"
+K_SERVER_URL = "plex_server_url"
+K_SERVER_NAME = "plex_server_name"
+K_MACHINE_ID = "plex_machine_id"
 
 
 class PlexError(RuntimeError):
@@ -42,11 +42,11 @@ class PlexNotLinkedError(PlexError):
 # --- response models ------------------------------------------------------
 
 
-class _PlexModel(BaseModel):
+class PlexModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
-class PlexPin(_PlexModel):
+class PlexPin(PlexModel):
     """Response from POST/GET /api/v2/pins (subset we use)."""
 
     id: int
@@ -54,55 +54,55 @@ class PlexPin(_PlexModel):
     auth_token: str | None = Field(default=None, alias="authToken")
 
 
-class PlexConnection(_PlexModel):
+class PlexConnection(PlexModel):
     uri: str
     local: bool = False
     protocol: str = ""
 
 
-class PlexResource(_PlexModel):
+class PlexResource(PlexModel):
     name: str = ""
     provides: str = ""
     owned: bool = False
     connections: list[PlexConnection] = Field(default_factory=list)
 
 
-class PlexUser(_PlexModel):
+class PlexUser(PlexModel):
     email: str = ""
 
 
-class _Identity(_PlexModel):
+class Identity(PlexModel):
     machine_identifier: str = Field(default="", alias="machineIdentifier")
 
 
-class PlexIdentityResponse(_PlexModel):
-    container: _Identity = Field(alias="MediaContainer")
+class PlexIdentityResponse(PlexModel):
+    container: Identity = Field(alias="MediaContainer")
 
 
-class _Part(_PlexModel):
+class Part(PlexModel):
     file: str = ""
 
 
-class _Media(_PlexModel):
-    parts: list[_Part] = Field(default_factory=list, alias="Part")
+class Media(PlexModel):
+    parts: list[Part] = Field(default_factory=list, alias="Part")
 
 
-class _Metadata(_PlexModel):
-    media: list[_Media] = Field(default_factory=list, alias="Media")
+class Metadata(PlexModel):
+    media: list[Media] = Field(default_factory=list, alias="Media")
 
 
-class _MediaContainer(_PlexModel):
-    metadata: list[_Metadata] = Field(default_factory=list, alias="Metadata")
+class MediaContainer(PlexModel):
+    metadata: list[Metadata] = Field(default_factory=list, alias="Metadata")
 
 
-class PlexMetadataResponse(_PlexModel):
-    container: _MediaContainer = Field(alias="MediaContainer")
+class PlexMetadataResponse(PlexModel):
+    container: MediaContainer = Field(alias="MediaContainer")
 
 
-_RESOURCES_ADAPTER: TypeAdapter[list[PlexResource]] = TypeAdapter(list[PlexResource])
+RESOURCES_ADAPTER: TypeAdapter[list[PlexResource]] = TypeAdapter(list[PlexResource])
 
 
-def _parse[T: BaseModel](model: type[T], payload: bytes, endpoint: str) -> T:
+def parse[T: BaseModel](model: type[T], payload: bytes, endpoint: str) -> T:
     try:
         return model.model_validate_json(payload)
     except ValidationError as exc:
@@ -114,32 +114,32 @@ def _parse[T: BaseModel](model: type[T], payload: bytes, endpoint: str) -> T:
 
 
 def get_or_create_client_id() -> str:
-    existing = db.kv_get(_K_CLIENT_ID)
+    existing = db.kv_get(K_CLIENT_ID)
     if existing:
         return existing
     client_id = str(uuid.uuid4())
-    db.kv_set(_K_CLIENT_ID, client_id)
+    db.kv_set(K_CLIENT_ID, client_id)
     return client_id
 
 
 def save_auth(token: str, server_url: str, server_name: str) -> None:
-    db.kv_set(_K_TOKEN, token)
-    db.kv_set(_K_SERVER_URL, server_url)
-    db.kv_set(_K_SERVER_NAME, server_name)
+    db.kv_set(K_TOKEN, token)
+    db.kv_set(K_SERVER_URL, server_url)
+    db.kv_set(K_SERVER_NAME, server_name)
 
 
 def clear_auth() -> None:
-    db.kv_set(_K_TOKEN, None)
-    db.kv_set(_K_SERVER_URL, None)
-    db.kv_set(_K_SERVER_NAME, None)
-    db.kv_set(_K_MACHINE_ID, None)
+    db.kv_set(K_TOKEN, None)
+    db.kv_set(K_SERVER_URL, None)
+    db.kv_set(K_SERVER_NAME, None)
+    db.kv_set(K_MACHINE_ID, None)
 
 
 def load_auth() -> tuple[str, str, str]:
     """Return (token, server_url, server_name) or raise PlexNotLinkedError."""
-    token = db.kv_get(_K_TOKEN)
-    url = db.kv_get(_K_SERVER_URL)
-    name = db.kv_get(_K_SERVER_NAME)
+    token = db.kv_get(K_TOKEN)
+    url = db.kv_get(K_SERVER_URL)
+    name = db.kv_get(K_SERVER_NAME)
     if not token or not url:
         msg = "Plex is not linked. Run `usharr auth`."
         raise PlexNotLinkedError(msg)
@@ -148,10 +148,10 @@ def load_auth() -> tuple[str, str, str]:
 
 def get_server_url() -> str | None:
     """Return the stored Plex server URL, or None if unlinked."""
-    return db.kv_get(_K_SERVER_URL)
+    return db.kv_get(K_SERVER_URL)
 
 
-def _headers(client_id: str, token: str | None = None) -> dict[str, str]:
+def headers(client_id: str, token: str | None = None) -> dict[str, str]:
     h = {
         "Accept": "application/json",
         "X-Plex-Product": PRODUCT,
@@ -181,13 +181,13 @@ async def create_pin(client_id: str) -> PlexPin:
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.post(
             f"{PLEX_TV}/api/v2/pins",
-            headers=_headers(client_id),
+            headers=headers(client_id),
             data={"strong": "true"},
         )
     if r.status_code != 201:
         msg = f"POST /api/v2/pins → {r.status_code}: {r.text[:200]}"
         raise PlexError(msg)
-    return _parse(PlexPin, r.content, "POST /api/v2/pins")
+    return parse(PlexPin, r.content, "POST /api/v2/pins")
 
 
 async def check_pin(client_id: str, pin_id: int) -> str | None:
@@ -195,7 +195,7 @@ async def check_pin(client_id: str, pin_id: int) -> str | None:
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(
             f"{PLEX_TV}/api/v2/pins/{pin_id}",
-            headers=_headers(client_id),
+            headers=headers(client_id),
         )
     if r.status_code == 404:
         msg = f"PIN {pin_id} expired or unknown"
@@ -203,7 +203,7 @@ async def check_pin(client_id: str, pin_id: int) -> str | None:
     if r.status_code != 200:
         msg = f"GET /api/v2/pins/{pin_id} → {r.status_code}"
         raise PlexError(msg)
-    return _parse(PlexPin, r.content, f"GET /api/v2/pins/{pin_id}").auth_token
+    return parse(PlexPin, r.content, f"GET /api/v2/pins/{pin_id}").auth_token
 
 
 async def poll_pin(
@@ -231,14 +231,14 @@ async def discover_server(client_id: str, token: str) -> tuple[str, str]:
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(
             f"{PLEX_TV}/api/v2/resources",
-            headers=_headers(client_id, token),
+            headers=headers(client_id, token),
             params={"includeHttps": "1", "includeRelay": "0"},
         )
     if r.status_code != 200:
         msg = f"GET /api/v2/resources → {r.status_code}"
         raise PlexError(msg)
     try:
-        resources = _RESOURCES_ADAPTER.validate_json(r.content)
+        resources = RESOURCES_ADAPTER.validate_json(r.content)
     except ValidationError as exc:
         msg = f"GET /api/v2/resources: bad response shape: {exc}"
         raise PlexError(msg) from exc
@@ -254,17 +254,17 @@ async def discover_server(client_id: str, token: str) -> tuple[str, str]:
 
     for s in servers:
         for c in sorted(s.connections, key=rank):
-            if await _reachable(c.uri, client_id, token):
+            if await reachable(c.uri, client_id, token):
                 return c.uri, s.name or "Plex Server"
 
     msg = "no reachable connection for any owned Plex server"
     raise PlexError(msg)
 
 
-async def _reachable(url: str, client_id: str, token: str) -> bool:
+async def reachable(url: str, client_id: str, token: str) -> bool:
     try:
         async with httpx.AsyncClient(timeout=3.0, verify=True) as client:
-            r = await client.get(f"{url}/identity", headers=_headers(client_id, token))
+            r = await client.get(f"{url}/identity", headers=headers(client_id, token))
         return r.status_code == 200
     except httpx.HTTPError:
         return False
@@ -274,11 +274,11 @@ async def account_email(client_id: str, token: str) -> str:
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(
             f"{PLEX_TV}/api/v2/user",
-            headers=_headers(client_id, token),
+            headers=headers(client_id, token),
         )
     if r.status_code != 200:
         return ""
-    return _parse(PlexUser, r.content, "GET /api/v2/user").email
+    return parse(PlexUser, r.content, "GET /api/v2/user").email
 
 
 # --- machineIdentifier ----------------------------------------------------
@@ -286,7 +286,7 @@ async def account_email(client_id: str, token: str) -> str:
 
 async def get_machine_identifier() -> str | None:
     """Cached fetch of the Plex server's machineIdentifier (for deep-links)."""
-    existing = db.kv_get(_K_MACHINE_ID)
+    existing = db.kv_get(K_MACHINE_ID)
     if existing:
         return existing
     try:
@@ -297,7 +297,7 @@ async def get_machine_identifier() -> str | None:
     endpoint = f"{server_url.rstrip('/')}/identity"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(endpoint, headers=_headers(client_id, token))
+            r = await client.get(endpoint, headers=headers(client_id, token))
     except httpx.HTTPError as exc:
         logger.warning("GET /identity failed: %s", exc)
         return None
@@ -305,12 +305,12 @@ async def get_machine_identifier() -> str | None:
         logger.warning("GET /identity → %s", r.status_code)
         return None
     try:
-        resp = _parse(PlexIdentityResponse, r.content, "GET /identity")
+        resp = parse(PlexIdentityResponse, r.content, "GET /identity")
     except PlexError:
         return None
     if not resp.container.machine_identifier:
         return None
-    db.kv_set(_K_MACHINE_ID, resp.container.machine_identifier)
+    db.kv_set(K_MACHINE_ID, resp.container.machine_identifier)
     return resp.container.machine_identifier
 
 
@@ -324,7 +324,7 @@ async def resolve_rating_key(rating_key: str) -> list[str]:
     endpoint = f"{server_url.rstrip('/')}/library/metadata/{rating_key}"
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            r = await client.get(endpoint, headers=_headers(client_id, token))
+            r = await client.get(endpoint, headers=headers(client_id, token))
         except httpx.HTTPError as exc:
             msg = f"request failed: {exc}"
             raise PlexError(msg) from exc
@@ -334,7 +334,7 @@ async def resolve_rating_key(rating_key: str) -> list[str]:
     if r.status_code != 200:
         msg = f"GET {endpoint} → {r.status_code}"
         raise PlexError(msg)
-    resp = _parse(PlexMetadataResponse, r.content, f"GET {endpoint}")
+    resp = parse(PlexMetadataResponse, r.content, f"GET {endpoint}")
     return [
         part.file
         for item in resp.container.metadata

@@ -17,27 +17,27 @@ from usharr.config import INTERVAL_SECONDS, Config
 logger = logging.getLogger(__name__)
 
 
-class _Model(BaseModel):
+class Model(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
-class _MovieFile(_Model):
+class MovieFile(Model):
     path: str = ""
 
 
-class _Movie(_Model):
+class Movie(Model):
     id: int
     tmdb_id: int | None = Field(default=None, alias="tmdbId")
     title: str = ""
     year: int | None = None
     has_file: bool = Field(default=False, alias="hasFile")
-    movie_file: _MovieFile | None = Field(default=None, alias="movieFile")
+    movie_file: MovieFile | None = Field(default=None, alias="movieFile")
 
 
-_MOVIES_ADAPTER: TypeAdapter[list[_Movie]] = TypeAdapter(list[_Movie])
+MOVIES_ADAPTER: TypeAdapter[list[Movie]] = TypeAdapter(list[Movie])
 
 
-async def _get_movies(base: str, api_key: str) -> list[_Movie]:
+async def get_movies(base: str, api_key: str) -> list[Movie]:
     url = f"{base.rstrip('/')}/api/v3/movie"
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         r = await client.get(url, headers={"X-Api-Key": api_key})
@@ -45,7 +45,7 @@ async def _get_movies(base: str, api_key: str) -> list[_Movie]:
         msg = f"GET {url} → {r.status_code}"
         raise RuntimeError(msg)
     try:
-        return _MOVIES_ADAPTER.validate_json(r.content)
+        return MOVIES_ADAPTER.validate_json(r.content)
     except ValidationError as exc:
         msg = f"bad radarr response: {exc}"
         raise RuntimeError(msg) from exc
@@ -58,7 +58,7 @@ async def sync_once(config: Config) -> dict:
         return {"skipped": True}
 
     try:
-        movies = await _get_movies(r.url, r.api_key)
+        movies = await get_movies(r.url, r.api_key)
     except Exception as exc:
         logger.warning("radarr_sync: fetch failed: %s", exc)
         return {"error": str(exc)}

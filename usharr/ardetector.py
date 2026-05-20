@@ -112,7 +112,7 @@ class DetectionResult:
 
 
 @dataclass
-class _MediaInfo:
+class MediaInfo:
     """Caller-supplied metadata; obtained here via ffprobe."""
 
     width: int
@@ -123,7 +123,7 @@ class _MediaInfo:
 
 
 @dataclass
-class _VideoInfo:
+class VideoInfo:
     width: int = 0
     height: int = 0
     duration: int = 0
@@ -148,7 +148,7 @@ class _VideoInfo:
 # --------------------------------------------------------------------------
 
 
-async def _ffprobe_media_info(path: Path) -> _MediaInfo | None:
+async def ffprobe_media_info(path: Path) -> MediaInfo | None:
     proc = await asyncio.create_subprocess_exec(
         "ffprobe",
         "-v",
@@ -191,11 +191,11 @@ async def _ffprobe_media_info(path: Path) -> _MediaInfo | None:
         height = int(s.get("height") or 0)
         duration = float(info.get("format", {}).get("duration") or 0.0)
         sar_raw = s.get("sample_aspect_ratio") or "1:1"
-        par = _parse_ratio(sar_raw)
-        bit_depth = _parse_bit_depth(s)
+        par = parse_ratio(sar_raw)
+        bit_depth = parse_bit_depth(s)
     except KeyError, ValueError, TypeError:
         return None
-    return _MediaInfo(
+    return MediaInfo(
         width=width,
         height=height,
         duration=duration,
@@ -204,7 +204,7 @@ async def _ffprobe_media_info(path: Path) -> _MediaInfo | None:
     )
 
 
-def _parse_bit_depth(stream: dict) -> int:
+def parse_bit_depth(stream: dict) -> int:
     """Derive luma bit depth from ffprobe fields, preferring pix_fmt.
 
     Many remuxes don't populate bits_per_raw_sample, so pix_fmt
@@ -237,7 +237,7 @@ def _parse_bit_depth(stream: dict) -> int:
     return parsed if parsed > 0 else 8
 
 
-def _parse_ratio(s: str) -> float:
+def parse_ratio(s: str) -> float:
     try:
         a, b = s.split(":", 1)
         num, den = float(a), float(b)
@@ -253,7 +253,7 @@ def _parse_ratio(s: str) -> float:
 # --------------------------------------------------------------------------
 
 
-async def _run_ffmpeg(
+async def run_ffmpeg(
     argv: list[str],
     pass_label: str,
     timeout: float = 120.0,
@@ -277,9 +277,9 @@ async def _run_ffmpeg(
     return stdout.decode("utf-8", errors="replace")
 
 
-async def _scan_dark_level(path: Path, position: float = 0.0) -> str:
+async def scan_dark_level(path: Path, position: float = 0.0) -> str:
     # -ss before -i, -vframes 1, signalstats,metadata=print.
-    return await _run_ffmpeg(
+    return await run_ffmpeg(
         [
             "ffmpeg",
             "-hide_banner",
@@ -302,7 +302,7 @@ async def _scan_dark_level(path: Path, position: float = 0.0) -> str:
     )
 
 
-async def _scan_sample(
+async def scan_sample(
     path: Path,
     start: int,
     dark_level: int,
@@ -313,7 +313,7 @@ async def _scan_sample(
     # `-vframes 1` + `skip=0` to evaluate exactly one frame (the keyframe
     # ffmpeg lands on with -noaccurate_seek). Content-identical to TMM's
     # first-match reading at a fraction of the decode cost.
-    return await _run_ffmpeg(
+    return await run_ffmpeg(
         [
             "ffmpeg",
             "-hide_banner",
@@ -342,12 +342,12 @@ async def _scan_sample(
 # --------------------------------------------------------------------------
 
 
-def _parse_video_meta(buf: str, mi: _MediaInfo, vi: _VideoInfo) -> None:
+def parse_video_meta(buf: str, mi: MediaInfo, vi: VideoInfo) -> None:
     m = P_DUR.search(buf)
     if m is not None:
         try:
             h, mnt, s_cs = m.group(1).split(":")
-            sec, _cs = s_cs.split(".")
+            sec, _ = s_cs.split(".")
             # truncate, do not round.
             vi.duration = int(h) * 3600 + int(mnt) * 60 + int(sec)
         except ValueError, AttributeError:
@@ -368,7 +368,7 @@ def _parse_video_meta(buf: str, mi: _MediaInfo, vi: _VideoInfo) -> None:
     vi.ar_sample = sar
 
 
-def _parse_dark_level(buf: str, vi: _VideoInfo) -> None:
+def parse_dark_level(buf: str, vi: VideoInfo) -> None:
     m = P_YLOW.search(buf)
     if m is not None and m.group(1):
         try:
@@ -382,7 +382,7 @@ def _parse_dark_level(buf: str, vi: _VideoInfo) -> None:
     vi.dark_level = 9999
 
 
-def _record_sample(
+def record_sample(
     x1: int,
     x2: int,
     y1: int,
@@ -390,7 +390,7 @@ def _record_sample(
     width: int,
     height: int,
     t_sec: int,
-    vi: _VideoInfo,
+    vi: VideoInfo,
     pass_label: str,
 ) -> bool:
     """Run plausibility checks; on pass, append to vi.timeline.
@@ -453,10 +453,10 @@ def _record_sample(
     return True
 
 
-def _parse_sample(
+def parse_sample(
     buf: str,
     t_sec: int,
-    vi: _VideoInfo,
+    vi: VideoInfo,
     pass_label: str,
 ) -> None:
     # use the FIRST match — the first decoded frame in the window.
@@ -464,7 +464,7 @@ def _parse_sample(
     if m is None:
         logger.debug("%s: sample: no cropdetect match in output", pass_label)
         return
-    _record_sample(
+    record_sample(
         x1=int(m.group(1)),
         x2=int(m.group(2)),
         y1=int(m.group(3)),
@@ -494,16 +494,16 @@ def _parse_sample(
 
 
 @dataclass
-class _Segment:
+class Segment:
     start_sec: int
     end_sec: int  # last sample's timestamp (inclusive)
     ar_median: float
     sample_count: int
 
 
-def _detect_segments(vi: _VideoInfo) -> list[_Segment]:
+def detect_segments(vi: VideoInfo) -> list[Segment]:
     """Walk vi.timeline, return confirmed (≥MIN_SEGMENT_SAMPLES) AR segments."""
-    segments: list[_Segment] = []
+    segments: list[Segment] = []
     if not vi.timeline:
         return segments
     tl = vi.timeline  # already chronologically ordered by the sampling loop
@@ -520,7 +520,7 @@ def _detect_segments(vi: _VideoInfo) -> list[_Segment]:
             ars.sort()
             median = ars[len(ars) // 2]
             segments.append(
-                _Segment(
+                Segment(
                     start_sec=tl[i][0],
                     end_sec=tl[j][0],
                     ar_median=median,
@@ -537,7 +537,7 @@ def _detect_segments(vi: _VideoInfo) -> list[_Segment]:
 # --------------------------------------------------------------------------
 
 
-def _round_ar_nearest(ar: float, ar_list: tuple[float, ...]) -> float:
+def round_ar_nearest(ar: float, ar_list: tuple[float, ...]) -> float:
     if len(ar_list) == 1:
         return ar_list[0]
     for i in range(len(ar_list) - 1):
@@ -547,13 +547,13 @@ def _round_ar_nearest(ar: float, ar_list: tuple[float, ...]) -> float:
     return ar_list[-1]
 
 
-def _round_ar(ar: float, ar_list: tuple[float, ...]) -> float:
+def round_ar(ar: float, ar_list: tuple[float, ...]) -> float:
     if not ar_list:
         return java_round(ar * 100) / 100
     if ROUND_UP:
         for provided in ar_list:
             if abs(provided - ar) <= ROUND_UP_THRESHOLD_PCT / 100:
-                return _round_ar_nearest(ar, ar_list)
+                return round_ar_nearest(ar, ar_list)
         best_delta = 999.0
         rounded = 999.0
         for provided in ar_list:
@@ -564,7 +564,7 @@ def _round_ar(ar: float, ar_list: tuple[float, ...]) -> float:
         if rounded == 999.0:
             rounded = ar_list[-1]
         return rounded
-    return _round_ar_nearest(ar, ar_list)
+    return round_ar_nearest(ar, ar_list)
 
 
 # --------------------------------------------------------------------------
@@ -572,7 +572,7 @@ def _round_ar(ar: float, ar_list: tuple[float, ...]) -> float:
 # --------------------------------------------------------------------------
 
 
-def _initial_sample_times(duration: int) -> list[int]:
+def initial_sample_times(duration: int) -> list[int]:
     """~INITIAL_SAMPLE_COUNT uniform sample times ignoring begin/end pct."""
     start = int(duration * IGNORE_BEGINNING_PCT / 100)
     end = int(duration * (1 - IGNORE_END_PCT / 100))
@@ -584,7 +584,7 @@ def _initial_sample_times(duration: int) -> list[int]:
     return [t for t in times if t < end]
 
 
-def _find_orphans(timeline: list[tuple[int, float]]) -> list[int]:
+def find_orphans(timeline: list[tuple[int, float]]) -> list[int]:
     """Indices of samples whose AR differs from both neighbours (or the one
     neighbour they have, for endpoints). Orphans are candidates for
     bisect-around refinement — either a real brief AR segment or noise."""
@@ -603,9 +603,9 @@ def _find_orphans(timeline: list[tuple[int, float]]) -> list[int]:
     return orphans
 
 
-async def _sample_at(
+async def sample_at(
     path: Path,
-    vi: _VideoInfo,
+    vi: VideoInfo,
     times: list[int],
     sampled: set[int],
     pass_label: str,
@@ -619,14 +619,14 @@ async def _sample_at(
         attempts += 1
         try:
             t_clamped = min(t, vi.duration - SAMPLE_DURATION)
-            result = await _scan_sample(path, t_clamped, vi.dark_level, pass_label)
-            _parse_sample(result, t_clamped, vi, pass_label)
+            result = await scan_sample(path, t_clamped, vi.dark_level, pass_label)
+            parse_sample(result, t_clamped, vi, pass_label)
         except Exception as exc:
             logger.debug("%s: sample error at %ds: %s", pass_label, t, exc)
     return attempts
 
 
-async def _full_decode_pass(path: Path, vi: _VideoInfo) -> int:
+async def full_decode_pass(path: Path, vi: VideoInfo) -> int:
     """Decode the file end-to-end, parsing one cropdetect line per second.
 
     Used when input-seek sampling produces no AR segment — typically because
@@ -661,7 +661,7 @@ async def _full_decode_pass(path: Path, vi: _VideoInfo) -> int:
     ]
     # Generous: a 2h movie can take a few minutes of wall time to decode.
     timeout = max(600.0, float(vi.duration))
-    buf = await _run_ffmpeg(argv, pass_label=pass_label, timeout=timeout)
+    buf = await run_ffmpeg(argv, pass_label=pass_label, timeout=timeout)
 
     parsed = 0
     for m in P_FULL_SAMPLE.finditer(buf):
@@ -669,7 +669,7 @@ async def _full_decode_pass(path: Path, vi: _VideoInfo) -> int:
         t_raw = float(m.group(7))
         if t_raw < 0:
             continue
-        _record_sample(
+        record_sample(
             x1=int(m.group(1)),
             x2=int(m.group(2)),
             y1=int(m.group(3)),
@@ -701,16 +701,16 @@ async def detect(path: Path) -> DetectionResult:
 
     ar_list = tuple(sorted(DEFAULT_AR_LIST))
 
-    mi = await _ffprobe_media_info(path)
+    mi = await ffprobe_media_info(path)
     if mi is None:
         msg = "ffprobe failed"
         raise RuntimeError(msg)
 
-    vi = _VideoInfo(bit_depth=mi.bit_depth)
+    vi = VideoInfo(bit_depth=mi.bit_depth)
 
-    dark_buf = await _scan_dark_level(path, 0.0)
-    _parse_video_meta(dark_buf, mi, vi)
-    _parse_dark_level(dark_buf, vi)
+    dark_buf = await scan_dark_level(path, 0.0)
+    parse_video_meta(dark_buf, mi, vi)
+    parse_dark_level(dark_buf, vi)
 
     # dark-level cap → fallback.
     bit_depth_max = 1 << vi.bit_depth
@@ -745,14 +745,14 @@ async def detect(path: Path) -> DetectionResult:
     # Initial coarse pass.
     sampled: set[int] = set()
     pass_label = "1"
-    initial_times = _initial_sample_times(vi.duration)
+    initial_times = initial_sample_times(vi.duration)
     logger.info(
         "%s: initial sampling %d points over %ds",
         pass_label,
         len(initial_times),
         vi.duration,
     )
-    sample_counter = await _sample_at(path, vi, initial_times, sampled, pass_label)
+    sample_counter = await sample_at(path, vi, initial_times, sampled, pass_label)
     logger.info(
         "%s: initial done: attempts=%d valid=%d",
         pass_label,
@@ -766,7 +766,7 @@ async def detect(path: Path) -> DetectionResult:
     refine_pass = 1
     while vi.sample_count > 0 and vi.sample_count < SAMPLE_COUNT_MAX:
         timeline = sorted(vi.timeline)
-        orphans = _find_orphans(timeline)
+        orphans = find_orphans(timeline)
         if not orphans:
             break
 
@@ -801,7 +801,7 @@ async def detect(path: Path) -> DetectionResult:
             len(orphans),
             len(sorted_midpoints),
         )
-        sample_counter += await _sample_at(
+        sample_counter += await sample_at(
             path,
             vi,
             sorted_midpoints,
@@ -814,7 +814,7 @@ async def detect(path: Path) -> DetectionResult:
             vi.sample_count,
         )
 
-    segments = _detect_segments(vi)
+    segments = detect_segments(vi)
     if not segments:
         # Some containers/encodes (notably certain Bluray-720p anime sources)
         # confuse ffmpeg's seek index — every -ss lands mid-NAL-unit and the
@@ -825,8 +825,8 @@ async def detect(path: Path) -> DetectionResult:
             " running full-decode pass",
             vi.sample_count,
         )
-        sample_counter += await _full_decode_pass(path, vi)
-        segments = _detect_segments(vi)
+        sample_counter += await full_decode_pass(path, vi)
+        segments = detect_segments(vi)
         if not segments:
             msg = (
                 "no AR segment after full-decode fallback"
@@ -839,7 +839,7 @@ async def detect(path: Path) -> DetectionResult:
     # across segments that snap to the same AR.
     rounded: dict[float, int] = {}
     for seg in segments:
-        snapped = _round_ar(seg.ar_median, ar_list)
+        snapped = round_ar(seg.ar_median, ar_list)
         rounded[snapped] = rounded.get(snapped, 0) + seg.sample_count
 
     total_confirmed = sum(rounded.values())
