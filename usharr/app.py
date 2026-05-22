@@ -843,36 +843,24 @@ async def get_info(file_path: str) -> InfoResponse:
 
 @api.post("/webhook")
 async def webhook(request: Request) -> dict:
-    """Accept webhook posts from any upstream (Plex / Sonarr / Radarr).
-
-    Dispatches by sniffing the payload shape:
-      - Plex sends ``multipart/form-data`` with a JSON ``payload`` field.
-      - Sonarr/Radarr send application/json with ``eventType`` + a
-        movie/series envelope. (TODO: wire those handlers when we have
-        concrete payload samples.)
-    """
-    ct = request.headers.get("content-type", "")
-    if "multipart/form-data" in ct:
-        form = await request.form()
-        raw = form.get("payload")
-        if raw is None:
-            raise HTTPException(status_code=400, detail="missing 'payload' field")
-        try:
-            payload = plex_sync.parse_webhook_payload(
-                raw if isinstance(raw, str) else await raw.read(),
-            )
-        except plex.PlexError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        result = await plex_sync.handle_webhook(payload, app.state.config)
-        local_path = result.get("local_path")
-        if local_path:
-            scanner.enqueue_probe(Path(local_path))
-        return result
-    # JSON — Sonarr/Radarr shapes land here. Not yet implemented.
-    raise HTTPException(
-        status_code=415,
-        detail="only Plex (multipart/form-data) webhooks handled right now",
-    )
+    """Handle Plex webhook"""
+    form = await request.form()
+    raw = form.get("payload")
+    if not raw:
+        raise HTTPException(status_code=400, detail="missing 'payload' field")
+    try:
+        payload = plex_sync.parse_webhook_payload(
+            raw if isinstance(raw, str) else await raw.read(),
+        )
+    except plex.PlexError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.debug("webhook payload %s", json.dumps(payload))
+    result = await plex_sync.handle_webhook(payload, app.state.config)
+    local_path = result.get("local_path")
+    if local_path:
+        scanner.enqueue_probe(Path(local_path))
+    logger.debug("webhook result %s", result)
+    return result
 
 
 @api.post("/task/scan")

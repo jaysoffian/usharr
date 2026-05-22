@@ -158,14 +158,6 @@ async def plex_sync_loop(config: Config) -> None:
 
 # --- webhook --------------------------------------------------------------
 
-WEBHOOK_EVENTS = frozenset(
-    {
-        "library.new",
-        "library.on.deck",
-        "library.update",
-    },
-)
-
 
 def parse_webhook_payload(raw: str | bytes) -> dict[str, Any]:
     try:
@@ -180,11 +172,18 @@ def parse_webhook_payload(raw: str | bytes) -> dict[str, Any]:
 
 
 async def handle_webhook(payload: dict[str, Any], config: Config) -> dict:
+    """Handle a Plex `library.new` webhook.
+
+    The payload's Metadata doesn't include the file path, so we re-fetch
+    by ratingKey, then map the remote path to local via `path_map`. The
+    caller enqueues a probe for that local path — the same code path the
+    full scan uses for a freshly-discovered file.
+    """
     event = str(payload.get("event") or "")
+    if event != "library.new":
+        return {"event": event, "action": "ignored"}
     metadata = payload.get("Metadata") or {}
     rating_key = str(metadata.get("ratingKey") or "")
-    if event not in WEBHOOK_EVENTS:
-        return {"event": event, "action": "ignored"}
     if not rating_key:
         return {"event": event, "action": "ignored", "reason": "no ratingKey"}
 
@@ -206,10 +205,15 @@ async def handle_webhook(payload: dict[str, Any], config: Config) -> dict:
     if not item.rating_key:
         item = LibMetadata(**item.model_dump(by_alias=True) | {"ratingKey": rating_key})
 
-    local_path = upsert(item, config.plex.path_map)
+    remote_path = pick_file(item)
+    if not remote_path:
+        return {"event": event, "action": "no_path", "rating_key": rating_key}
+
+    upsert(item, config.plex.path_map)
+    local_path = db.map_remote_path(remote_path, config.plex.path_map)
     return {
         "event": event,
-        "action": "upserted",
+        "action": "enqueued",
         "rating_key": item.rating_key or rating_key,
         "local_path": local_path,
     }
