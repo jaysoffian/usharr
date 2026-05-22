@@ -37,7 +37,7 @@ select = [
     "SIM", "PL", "RUF", "PIE", "RET", "PERF", "FURB",
     "LOG", "G", "T20", "PTH", "TID",
 ]
-ignore = ["PLR09", "PLR2004", "PLW2901", "SIM108", "BLE001"]
+ignore = ["E501", "PLR09", "PLR2004", "PLW2901", "SIM108", "BLE001"]
 
 [tool.ruff.lint.per-file-ignores]
 "usharr/cli.py" = ["T201"]

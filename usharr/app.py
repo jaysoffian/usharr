@@ -11,9 +11,10 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -842,25 +843,20 @@ async def get_info(file_path: str) -> InfoResponse:
 
 
 @api.post("/webhook")
-async def webhook(request: Request) -> dict:
+async def webhook(form: Annotated[plex_sync.WebhookForm, Form()]) -> Response:
     """Handle Plex webhook"""
-    form = await request.form()
-    raw = form.get("payload")
-    if not raw:
-        raise HTTPException(status_code=400, detail="missing 'payload' field")
-    try:
-        payload = plex_sync.parse_webhook_payload(
-            raw if isinstance(raw, str) else await raw.read(),
-        )
-    except plex.PlexError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    logger.debug("webhook payload %s", json.dumps(payload))
-    result = await plex_sync.handle_webhook(payload, app.state.config)
-    local_path = result.get("local_path")
-    if local_path:
+    payload = form.payload
+
+    if payload.event != "library.new":
+        return Response(status_code=204)
+
+    rating_key = payload.metadata.rating_key
+    path_map = app.state.config.plex.path_map
+
+    if local_path := await plex_sync.library_new(rating_key, path_map):
         scanner.enqueue_probe(Path(local_path))
-    logger.debug("webhook result %s", result)
-    return result
+
+    return Response(status_code=204)
 
 
 @api.post("/task/scan")

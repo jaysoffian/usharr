@@ -68,7 +68,9 @@ def enqueue_probe(
     try:
         queue.put_nowait((path, force, force_mediainfo))
     except asyncio.QueueFull:
+        logger.info("enqueue_probe: QueueFull")
         return False
+    logger.debug("enqueue_probe: %s", path)
     return True
 
 

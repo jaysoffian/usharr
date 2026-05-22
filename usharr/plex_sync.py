@@ -6,13 +6,18 @@ section, and upserts `plex_item` rows. Webhook endpoint (wired in
 """
 
 import asyncio
-import json
 import logging
 import time
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 
 from usharr import db, plex
 from usharr.config import INTERVAL_SECONDS, Config
@@ -85,6 +90,7 @@ def pick_file(item: LibMetadata) -> str | None:
 
 
 def upsert(item: LibMetadata, path_map: dict[str, str]) -> str | None:
+    logger.debug("upsert %r", item)
     return db.upsert_plex_item(
         rating_key=item.rating_key,
         item_type=item.type or "movie",
@@ -159,61 +165,40 @@ async def plex_sync_loop(config: Config) -> None:
 # --- webhook --------------------------------------------------------------
 
 
-def parse_webhook_payload(raw: str | bytes) -> dict[str, Any]:
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        msg = f"invalid webhook JSON: {exc}"
-        raise plex.PlexError(msg) from exc
-    if not isinstance(data, dict):
-        msg = "webhook payload is not a JSON object"
-        raise plex.PlexError(msg)
-    return data
+class WebhookMetadata(Model):
+    rating_key: str = Field(alias="ratingKey")
 
 
-async def handle_webhook(payload: dict[str, Any], config: Config) -> dict:
-    """Handle a Plex `library.new` webhook.
+class WebhookPayload(Model):
+    event: str
+    metadata: WebhookMetadata = Field(alias="Metadata")
 
-    The payload's Metadata doesn't include the file path, so we re-fetch
-    by ratingKey, then map the remote path to local via `path_map`. The
-    caller enqueues a probe for that local path — the same code path the
-    full scan uses for a freshly-discovered file.
-    """
-    event = str(payload.get("event") or "")
-    if event != "library.new":
-        return {"event": event, "action": "ignored"}
-    metadata = payload.get("Metadata") or {}
-    rating_key = str(metadata.get("ratingKey") or "")
-    if not rating_key:
-        return {"event": event, "action": "ignored", "reason": "no ratingKey"}
+    @model_validator(mode="before")
+    @classmethod
+    def parse_json_string(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return cls.model_validate_json(value)
+        return value
 
-    try:
-        _, server_url, _ = plex.load_auth()
-    except plex.PlexNotLinkedError:
-        return {"event": event, "action": "not_linked"}
 
-    url = f"{server_url.rstrip('/')}/library/metadata/{rating_key}"
-    try:
-        resp = await get_json(LibResponse, url)
-    except plex.PlexError as exc:
-        return {"event": event, "action": "fetch_failed", "error": str(exc)}
+class WebhookForm(Model):
+    payload: WebhookPayload
 
-    items = resp.container.metadata
-    if not items:
-        return {"event": event, "action": "not_found"}
-    item = items[0]
-    if not item.rating_key:
-        item = LibMetadata(**item.model_dump(by_alias=True) | {"ratingKey": rating_key})
 
-    remote_path = pick_file(item)
-    if not remote_path:
-        return {"event": event, "action": "no_path", "rating_key": rating_key}
+async def library_new(rating_key: str, path_map: dict[str, str]) -> str | None:
+    """Handle a Plex `library.new` webhook. Return local path if found."""
 
-    upsert(item, config.plex.path_map)
-    local_path = db.map_remote_path(remote_path, config.plex.path_map)
-    return {
-        "event": event,
-        "action": "enqueued",
-        "rating_key": item.rating_key or rating_key,
-        "local_path": local_path,
-    }
+    logger.debug("library_new: %s", rating_key)
+
+    _, server_url, _ = plex.load_auth()
+
+    url = f"{server_url}/library/metadata/{rating_key}"
+    resp = await get_json(LibResponse, url)
+    if not resp.container.metadata:
+        return None
+
+    item = resp.container.metadata[0]
+    if remote_path := pick_file(item):
+        upsert(item, path_map)
+        return db.map_remote_path(remote_path, path_map)
+    return None
