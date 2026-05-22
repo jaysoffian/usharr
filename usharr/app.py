@@ -35,12 +35,18 @@ from usharr.config import Config, load_config
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"),
+        logging.Formatter("%(asctime)s [%(name)s %(levelname)s] %(message)s"),
     )
-    app_logger = logging.getLogger("usharr")
-    app_logger.setLevel(logging.DEBUG)
-    app_logger.addHandler(handler)
-    app_logger.propagate = False
+    for name, level in (
+        ("usharr", logging.DEBUG),
+        ("uvicorn", logging.INFO),
+        ("uvicorn.access", logging.INFO),
+        ("uvicorn.error", logging.INFO),
+    ):
+        log = logging.getLogger(name)
+        log.setLevel(level)
+        log.handlers = [handler]
+        log.propagate = False
 
 
 configure_logging()
