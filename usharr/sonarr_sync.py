@@ -23,9 +23,7 @@ class Model(BaseModel):
 
 class Series(Model):
     id: int
-    tvdb_id: int | None = Field(default=None, alias="tvdbId")
     title_slug: str = Field(default="", alias="titleSlug")
-    title: str = ""
     path: str = ""  # series folder
 
 
@@ -65,9 +63,7 @@ async def sync_once(config: Config) -> dict:
         seen.add(row.id)
         db.upsert_sonarr_series(
             series_id=row.id,
-            tvdb_id=row.tvdb_id,
             title_slug=row.title_slug or None,
-            title=row.title or None,
             remote_path=row.path or None,
             path_map=s.path_map,
             updated_at=now,

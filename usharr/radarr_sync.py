@@ -28,8 +28,6 @@ class MovieFile(Model):
 class Movie(Model):
     id: int
     tmdb_id: int | None = Field(default=None, alias="tmdbId")
-    title: str = ""
-    year: int | None = None
     has_file: bool = Field(default=False, alias="hasFile")
     movie_file: MovieFile | None = Field(default=None, alias="movieFile")
 
@@ -72,8 +70,6 @@ async def sync_once(config: Config) -> dict:
         db.upsert_radarr_movie(
             movie_id=m.id,
             tmdb_id=m.tmdb_id,
-            title=m.title or None,
-            year=m.year,
             remote_path=file_path or None,
             path_map=r.path_map,
             updated_at=now,

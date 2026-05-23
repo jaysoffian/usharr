@@ -124,15 +124,12 @@ CREATE TABLE IF NOT EXISTS plex_item (
 
 CREATE TABLE IF NOT EXISTS bazarr_movie (
     radarr_id    INTEGER PRIMARY KEY,
-    title        TEXT,
-    year         INTEGER,
     local_path   TEXT,             -- remote movie file path mapped via path_map
     updated_at   INTEGER NOT NULL
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS bazarr_series (
     sonarr_id    INTEGER PRIMARY KEY,
-    title        TEXT,
     local_folder TEXT,             -- remote show folder mapped via path_map
     updated_at   INTEGER NOT NULL
 ) WITHOUT ROWID;
@@ -140,17 +137,13 @@ CREATE TABLE IF NOT EXISTS bazarr_series (
 CREATE TABLE IF NOT EXISTS radarr_movie (
     movie_id   INTEGER PRIMARY KEY,  -- Radarr's internal id
     tmdb_id    INTEGER,               -- for /movie/{tmdbId} deep-links
-    title      TEXT,
-    year       INTEGER,
     local_path TEXT,                  -- remote movie file path mapped via path_map
     updated_at INTEGER NOT NULL
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS sonarr_series (
     series_id    INTEGER PRIMARY KEY, -- Sonarr's internal id
-    tvdb_id      INTEGER,
     title_slug   TEXT,                -- for /series/{slug} deep-links
-    title        TEXT,
     local_folder TEXT,                -- remote series folder mapped via path_map
     updated_at   INTEGER NOT NULL
 ) WITHOUT ROWID;
@@ -1062,16 +1055,14 @@ def upsert_bazarr_movie(
     radarr_id: int,
     updated_at: int,
     path_map: dict[str, str],
-    title: str | None = None,
-    year: int | None = None,
     remote_path: str | None = None,
 ) -> None:
     local_path = resolve_local_file(remote_path, path_map)
     get_conn().execute(
         "INSERT OR REPLACE INTO bazarr_movie"
-        " (radarr_id, title, year, local_path, updated_at)"
-        " VALUES (?,?,?,?,?)",
-        (radarr_id, title, year, local_path, updated_at),
+        " (radarr_id, local_path, updated_at)"
+        " VALUES (?,?,?)",
+        (radarr_id, local_path, updated_at),
     )
 
 
@@ -1080,15 +1071,14 @@ def upsert_bazarr_series(
     sonarr_id: int,
     updated_at: int,
     path_map: dict[str, str],
-    title: str | None = None,
     remote_path: str | None = None,
 ) -> None:
     local_folder = resolve_local_folder(remote_path, path_map)
     get_conn().execute(
         "INSERT OR REPLACE INTO bazarr_series"
-        " (sonarr_id, title, local_folder, updated_at)"
-        " VALUES (?,?,?,?)",
-        (sonarr_id, title, local_folder, updated_at),
+        " (sonarr_id, local_folder, updated_at)"
+        " VALUES (?,?,?)",
+        (sonarr_id, local_folder, updated_at),
     )
 
 
@@ -1159,16 +1149,14 @@ def upsert_radarr_movie(
     updated_at: int,
     path_map: dict[str, str],
     tmdb_id: int | None = None,
-    title: str | None = None,
-    year: int | None = None,
     remote_path: str | None = None,
 ) -> None:
     local_path = resolve_local_file(remote_path, path_map)
     get_conn().execute(
         "INSERT OR REPLACE INTO radarr_movie"
-        " (movie_id, tmdb_id, title, year, local_path, updated_at)"
-        " VALUES (?,?,?,?,?,?)",
-        (movie_id, tmdb_id, title, year, local_path, updated_at),
+        " (movie_id, tmdb_id, local_path, updated_at)"
+        " VALUES (?,?,?,?)",
+        (movie_id, tmdb_id, local_path, updated_at),
     )
 
 
@@ -1201,17 +1189,15 @@ def upsert_sonarr_series(
     series_id: int,
     updated_at: int,
     path_map: dict[str, str],
-    tvdb_id: int | None = None,
     title_slug: str | None = None,
-    title: str | None = None,
     remote_path: str | None = None,
 ) -> None:
     local_folder = resolve_local_folder(remote_path, path_map)
     get_conn().execute(
         "INSERT OR REPLACE INTO sonarr_series"
-        " (series_id, tvdb_id, title_slug, title, local_folder, updated_at)"
-        " VALUES (?,?,?,?,?,?)",
-        (series_id, tvdb_id, title_slug, title, local_folder, updated_at),
+        " (series_id, title_slug, local_folder, updated_at)"
+        " VALUES (?,?,?,?)",
+        (series_id, title_slug, local_folder, updated_at),
     )
 
 

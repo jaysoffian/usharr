@@ -30,14 +30,11 @@ class Model(BaseModel):
 
 class BazMovie(Model):
     radarr_id: int = Field(alias="radarrId")
-    title: str = ""
-    year: str | int | None = None
     path: str = ""
 
 
 class BazSeries(Model):
     sonarr_series_id: int = Field(alias="sonarrSeriesId")
-    title: str = ""
     path: str = ""
 
 
@@ -61,17 +58,6 @@ async def get[T: Model](model: type[T], base: str, path: str, api_key: str) -> T
     except ValidationError as exc:
         msg = f"bad response at {url}: {exc}"
         raise RuntimeError(msg) from exc
-
-
-def year_to_int(year: str | int | None) -> int | None:
-    if year is None:
-        return None
-    if isinstance(year, int):
-        return year
-    try:
-        return int(str(year).split("-")[0][:4])
-    except ValueError, IndexError:
-        return None
 
 
 async def sync_once(config: Config) -> dict:
@@ -104,8 +90,6 @@ async def sync_once(config: Config) -> dict:
         seen_movies.add(m.radarr_id)
         db.upsert_bazarr_movie(
             radarr_id=m.radarr_id,
-            title=m.title or None,
-            year=year_to_int(m.year),
             remote_path=m.path or None,
             path_map=bz.path_map,
             updated_at=now,
@@ -116,7 +100,6 @@ async def sync_once(config: Config) -> dict:
         seen_series.add(s.sonarr_series_id)
         db.upsert_bazarr_series(
             sonarr_id=s.sonarr_series_id,
-            title=s.title or None,
             remote_path=s.path or None,
             path_map=bz.path_map,
             updated_at=now,
