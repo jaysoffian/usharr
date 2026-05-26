@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 async def reconcile_loop() -> None:
     """Full scan, then refresh Plex + *arr metadata in parallel, then sleep."""
     while True:
-        await scanner.scan()
+        await scanner.scan_and_drain()
         await asyncio.gather(
             plex_sync.sync(),
             bazarr_sync.sync(),
@@ -82,7 +82,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         tasks = (
             asyncio.create_task(reconcile_loop()),
-            asyncio.create_task(scanner.probe_worker()),
+            asyncio.create_task(scanner.scan_worker()),
+            asyncio.create_task(scanner.mediainfo_worker()),
+            asyncio.create_task(scanner.ardetector_worker()),
         )
         logger.info("usharr started; library=%s", config.library)
     yield
@@ -103,15 +105,6 @@ app.mount("/static", StaticFiles(directory=here / "static"), name="static")
 templates = Jinja2Templates(directory=here / "templates")
 templates.env.filters["pathencode"] = lambda s: quote(s or "", safe="/")
 templates.env.globals["resolution_bucket"] = fmt.resolution_bucket
-
-bg_tasks: set[asyncio.Task] = set()
-
-
-def spawn(coro: object) -> asyncio.Task:
-    t = asyncio.create_task(coro)  # type: ignore[arg-type]
-    bg_tasks.add(t)
-    t.add_done_callback(bg_tasks.discard)
-    return t
 
 
 def slug(name: str) -> str:
@@ -863,71 +856,49 @@ async def webhook(form: Annotated[plex_sync.WebhookForm, Form()]) -> Response:
     path_map = app.state.config.plex.path_map
 
     if local_path := await plex_sync.library_new(rating_key, path_map):
-        scanner.enqueue_probe(Path(local_path))
+        scanner.request_probe(Path(local_path))
 
     return Response(status_code=204)
 
 
+def one_path(file_path: str) -> Path:
+    path = Path("/" + file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"not a file: {path}")
+    return path
+
+
 @api.post("/task/scan")
-async def task_scan() -> dict:
+async def task_scan() -> Response:
     """Incremental library sweep: pick up new files, reprobe changed ones."""
-    spawn(scanner.scan())
-    return {"triggered": True, "task": "scan"}
-
-
-@api.post("/task/scan/{file_path:path}")
-async def task_scan_one(file_path: str) -> dict:
-    """Incremental scan of a single file: probe iff not already fresh.
-
-    The typical caller is a webhook — "Sonarr just imported this,
-    please probe if you haven't already". Idempotent: returning
-    ``scanned: true`` means the DB row already matches the file's
-    size+mtime, so nothing was enqueued.
-    """
-    p = Path("/" + file_path)
-    if not p.is_file():
-        raise HTTPException(status_code=404, detail=f"not a file: {p}")
-    scanned = scanner.is_scanned(p)
-    if not scanned:
-        scanner.enqueue_probe(p)
-    return {
-        "triggered": not scanned,
-        "task": "scan",
-        "path": str(p),
-        "scanned": scanned,
-    }
+    scanner.request_scan()
+    return Response(status_code=202)
 
 
 @api.post("/task/refresh")
-async def task_refresh_all() -> dict:
+async def task_refresh() -> Response:
     """Force-refresh mediainfo on every file. AR cache preserved."""
-    spawn(scanner.scan(refresh=True))
-    return {"triggered": True, "task": "refresh"}
+    scanner.request_scan(refresh=True)
+    return Response(status_code=202)
 
 
 @api.post("/task/refresh/{file_path:path}")
-async def task_refresh_one(file_path: str) -> dict:
-    p = Path("/" + file_path)
-    if not p.is_file():
-        raise HTTPException(status_code=404, detail=f"not a file: {p}")
-    enqueued = scanner.enqueue_probe(p, refresh=True)
-    return {"triggered": True, "task": "refresh", "path": str(p), "enqueued": enqueued}
+async def task_refresh_path(file_path: str) -> Response:
+    scanner.request_probe(one_path(file_path), refresh=True)
+    return Response(status_code=202)
 
 
 @api.post("/task/analyze")
-async def task_analyze_all() -> dict:
+async def task_analyze() -> Response:
     """Force-reprobe AR and mediainfo on every file. Slow."""
-    spawn(scanner.scan(reanalyze=True))
-    return {"triggered": True, "task": "analyze"}
+    scanner.request_scan(reanalyze=True)
+    return Response(status_code=202)
 
 
 @api.post("/task/analyze/{file_path:path}")
-async def task_analyze_one(file_path: str) -> dict:
-    p = Path("/" + file_path)
-    if not p.is_file():
-        raise HTTPException(status_code=404, detail=f"not a file: {p}")
-    enqueued = scanner.enqueue_probe(p, reanalyze=True)
-    return {"triggered": True, "task": "analyze", "path": str(p), "enqueued": enqueued}
+async def task_analyze_path(file_path: str) -> Response:
+    scanner.request_probe(one_path(file_path), reanalyze=True)
+    return Response(status_code=202)
 
 
 app.include_router(api)

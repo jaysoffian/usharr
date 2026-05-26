@@ -11,16 +11,16 @@ Subcommands:
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from usharr import db, plex
+from usharr import db, plex, scanner
 from usharr.ardetector import detect
 from usharr.config import load_config
-from usharr.scanner import scan
 
 
 async def cmd_probe(args: argparse.Namespace) -> int:
@@ -46,9 +46,18 @@ async def cmd_scan(_: argparse.Namespace) -> int:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
     db.init_db()
+    workers = [
+        asyncio.create_task(scanner.mediainfo_worker()),
+        asyncio.create_task(scanner.ardetector_worker()),
+    ]
     try:
-        await scan()
+        await scanner.scan_and_drain()
     finally:
+        for w in workers:
+            w.cancel()
+        for w in workers:
+            with contextlib.suppress(asyncio.CancelledError):
+                await w
         db.close_db()
     return 0
 
