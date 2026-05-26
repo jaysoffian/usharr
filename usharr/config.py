@@ -2,14 +2,14 @@
 
 import logging
 import os
-from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
+from typing import Any
 
+from pydantic import BaseModel, Field, model_validator
 from ruamel.yaml import YAML
 
 logger = logging.getLogger(__name__)
-
-CONFIG_PATH = Path(os.environ.get("USHARR_CONFIG", "config.yaml"))
 
 # How often background loops (scan + sync) wake up to run another pass.
 INTERVAL_SECONDS = 3600
@@ -68,8 +68,22 @@ library:
 """
 
 
-@dataclass
-class PlexConfig:
+class StripNonesModel(BaseModel):
+    """Drop None field values before validation so model defaults apply.
+
+    YAML `foo:` with no children parses as None — without this, every
+    optional subkey on every model would have to tolerate None explicitly.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def strip_nones(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v is not None}
+        return data
+
+
+class PlexConfig(StripNonesModel):
     # Overrides the URL used in deep-links. Without this, usharr uses
     # the URL it auto-discovered during `usharr auth`, which is often
     # an ugly plex.direct subdomain. API calls always use the stored
@@ -78,87 +92,51 @@ class PlexConfig:
     url: str | None = None
     # {local_prefix: remote_prefix} — rewrite Plex-reported paths so
     # they match usharr's mounts before suffix matching runs.
-    path_map: dict[str, str] = field(default_factory=dict)
+    path_map: dict[str, str] = Field(default_factory=dict)
 
 
-@dataclass
-class TautulliConfig:
+class TautulliConfig(StripNonesModel):
     url: str | None = None
 
 
-@dataclass
-class BazarrConfig:
+class BazarrConfig(StripNonesModel):
     url: str | None = None
     api_key: str | None = None
     # {local_prefix: remote_prefix} — rewrite Bazarr-reported paths
     # so they match usharr's mounts.
-    path_map: dict[str, str] = field(default_factory=dict)
+    path_map: dict[str, str] = Field(default_factory=dict)
 
 
-@dataclass
-class RadarrConfig:
+class RadarrConfig(StripNonesModel):
     url: str | None = None
     api_key: str | None = None
-    path_map: dict[str, str] = field(default_factory=dict)
+    path_map: dict[str, str] = Field(default_factory=dict)
 
 
-@dataclass
-class SonarrConfig:
+class SonarrConfig(StripNonesModel):
     url: str | None = None
     api_key: str | None = None
-    path_map: dict[str, str] = field(default_factory=dict)
+    path_map: dict[str, str] = Field(default_factory=dict)
 
 
-@dataclass
-class Config:
-    library: dict[str, list[str]] = field(default_factory=dict)
-    plex: PlexConfig = field(default_factory=PlexConfig)
-    tautulli: TautulliConfig = field(default_factory=TautulliConfig)
-    bazarr: BazarrConfig = field(default_factory=BazarrConfig)
-    radarr: RadarrConfig = field(default_factory=RadarrConfig)
-    sonarr: SonarrConfig = field(default_factory=SonarrConfig)
+class Config(StripNonesModel):
+    library: dict[str, list[str]] = Field(default_factory=dict)
+    plex: PlexConfig = Field(default_factory=PlexConfig)
+    tautulli: TautulliConfig = Field(default_factory=TautulliConfig)
+    bazarr: BazarrConfig = Field(default_factory=BazarrConfig)
+    radarr: RadarrConfig = Field(default_factory=RadarrConfig)
+    sonarr: SonarrConfig = Field(default_factory=SonarrConfig)
 
     @property
     def all_paths(self) -> list[str]:
         return [p for paths in self.library.values() for p in paths]
 
 
-def load_config(path: Path | None = None) -> Config:
-    config_path = path or CONFIG_PATH
-    if not config_path.exists():
-        logger.warning("Config %s not found, seeding defaults", config_path)
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(SEED_CONFIG)
-
-    raw = yaml.load(config_path) or {}
-    library_raw = raw.get("library") or {}
-    plex_raw = raw.get("plex") or {}
-    tautulli_raw = raw.get("tautulli") or {}
-    bazarr_raw = raw.get("bazarr") or {}
-    radarr_raw = raw.get("radarr") or {}
-    sonarr_raw = raw.get("sonarr") or {}
-    return Config(
-        library={str(k): list(v or []) for k, v in library_raw.items()},
-        plex=PlexConfig(
-            url=plex_raw.get("url") or None,
-            path_map=dict(plex_raw.get("path_map") or {}),
-        ),
-        tautulli=TautulliConfig(
-            url=tautulli_raw.get("url") or None,
-        ),
-        bazarr=BazarrConfig(
-            url=bazarr_raw.get("url") or None,
-            api_key=bazarr_raw.get("api_key") or None,
-            path_map=dict(bazarr_raw.get("path_map") or {}),
-        ),
-        radarr=RadarrConfig(
-            url=radarr_raw.get("url") or None,
-            api_key=radarr_raw.get("api_key") or None,
-            path_map=dict(radarr_raw.get("path_map") or {}),
-        ),
-        sonarr=SonarrConfig(
-            url=sonarr_raw.get("url") or None,
-            api_key=sonarr_raw.get("api_key") or None,
-            path_map=dict(sonarr_raw.get("path_map") or {}),
-        ),
-    )
+@cache
+def get_config() -> Config:
+    path = Path(os.environ.get("USHARR_CONFIG", "config.yaml"))
+    if not path.exists():
+        logger.warning("Config %s not found, seeding defaults", path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(SEED_CONFIG)
+    return Config.model_validate(yaml.load(path) or {})

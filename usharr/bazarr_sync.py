@@ -18,7 +18,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from usharr import db
-from usharr.config import load_config
+from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ async def get[T: Model](model: type[T], url: str, api_key: str) -> T:
 
 async def sync() -> None:
     try:
-        bz = load_config().bazarr
+        bz = get_config().bazarr
         if not bz.url or not bz.api_key:
             logger.info("bazarr_sync: not configured; skipping")
             return

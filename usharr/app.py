@@ -30,7 +30,7 @@ from usharr import (
     sonarr_sync,
 )
 from usharr import format as fmt
-from usharr.config import INTERVAL_SECONDS, Config, load_config
+from usharr.config import INTERVAL_SECONDS, get_config
 
 
 def configure_logging() -> None:
@@ -69,9 +69,8 @@ async def reconcile_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    config = load_config()
     db.init_db()
-    app.state.config = config
+    get_config()
     # USHARR_DB_RO: serve the DB read-only without spawning the reconcile
     # / probe loops. Used by `make dev` to test UI changes against a
     # copied prod DB without trashing it (scan deletes any rows
@@ -86,7 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             asyncio.create_task(scanner.mediainfo_worker()),
             asyncio.create_task(scanner.ardetector_worker()),
         )
-        logger.info("usharr started; library=%s", config.library)
+        logger.info("usharr started; library=%s", get_config().library)
     yield
     for t in tasks:
         t.cancel()
@@ -112,15 +111,15 @@ def slug(name: str) -> str:
     return slug or "library"
 
 
-def libraries(config: Config) -> list[dict]:
+def libraries() -> list[dict]:
     return [
         {"slug": slug(name), "label": name, "paths": list(paths)}
-        for name, paths in config.library.items()
+        for name, paths in get_config().library.items()
     ]
 
 
-def library_by_slug(config: Config, slug: str) -> dict | None:
-    for lib in libraries(config):
+def library_by_slug(slug: str) -> dict | None:
+    for lib in libraries():
         if lib["slug"] == slug:
             return lib
     return None
@@ -504,7 +503,7 @@ async def health() -> dict:
 
 @app.get("/", response_class=RedirectResponse, include_in_schema=False)
 async def index() -> RedirectResponse:
-    libs = libraries(app.state.config)
+    libs = libraries()
     if not libs:
         raise HTTPException(status_code=500, detail="no library configured")
     return RedirectResponse(url=f"/library/{libs[0]['slug']}", status_code=302)
@@ -512,8 +511,7 @@ async def index() -> RedirectResponse:
 
 @app.get("/library/{slug}", response_class=HTMLResponse, include_in_schema=False)
 async def library_page(request: Request, slug: str) -> HTMLResponse:
-    config: Config = app.state.config
-    lib = library_by_slug(config, slug)
+    lib = library_by_slug(slug)
     if lib is None:
         raise HTTPException(status_code=404, detail=f"no library {slug!r}")
 
@@ -523,6 +521,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     )
     audio_by_path, sub_by_path = library_tracks_for(lib)
 
+    config = get_config()
     machine_id = await plex.get_machine_identifier()
     server_url = config.plex.url or plex.get_server_url()
     tautulli_url = config.tautulli.url
@@ -640,7 +639,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
             "titles": titles,
             "episodes": episodes,
             "is_tv": is_tv,
-            "libraries": libraries(config),
+            "libraries": libraries(),
             "current_slug": slug,
             "jump_letters": JUMP_LETTERS,
             "available_letters": available,
@@ -653,13 +652,8 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     mf = db.get(path)
     if mf is None:
         raise HTTPException(status_code=404, detail=f"no record for {path}")
-    config: Config = app.state.config
     lib = next(
-        (
-            lib
-            for lib in libraries(config)
-            if any(path.startswith(p) for p in lib["paths"])
-        ),
+        (lib for lib in libraries() if any(path.startswith(p) for p in lib["paths"])),
         None,
     )
     prev_path: str | None = None
@@ -699,6 +693,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     mi = db.get_mediainfo(path)
     ar = db.get_ardetector(path)
     aspect_set = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
+    config = get_config()
     machine_id = await plex.get_machine_identifier()
     server_url = config.plex.url or plex.get_server_url()
     rating_key = plex_item.rating_key if plex_item else None
@@ -759,7 +754,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             "radarr_url": radarr_url_for(config.radarr.url, path),
             "sonarr_url": sonarr_url_for(config.sonarr.url, path),
             "extras": extras,
-            "libraries": libraries(config),
+            "libraries": libraries(),
             "current_slug": lib["slug"] if lib else "",
             "library_label": lib["label"] if lib else "Library",
             "prev_path": prev_path,
@@ -820,9 +815,9 @@ async def get_info_by_content_id(content_id: str) -> InfoByContentIdResponse:
             status_code=404,
             detail=f"no Media/Part for content_id={content_id}",
         )
-    config: Config = app.state.config
+    path_map = get_config().plex.path_map
     for f in plex_files:
-        row = db.get_by_remote_path(f, config.plex.path_map)
+        row = db.get_by_remote_path(f, path_map)
         if row is not None:
             return InfoByContentIdResponse(
                 **build_info(row).model_dump(),
@@ -853,7 +848,7 @@ async def webhook(form: Annotated[plex_sync.WebhookForm, Form()]) -> Response:
         return Response(status_code=204)
 
     rating_key = payload.metadata.rating_key
-    path_map = app.state.config.plex.path_map
+    path_map = get_config().plex.path_map
 
     if local_path := await plex_sync.library_new(rating_key, path_map):
         scanner.request_probe(Path(local_path))

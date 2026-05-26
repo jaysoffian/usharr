@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from usharr import db
-from usharr.config import load_config
+from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ async def get_movies(base: str, api_key: str) -> list[Movie]:
 
 async def sync() -> None:
     try:
-        r = load_config().radarr
+        r = get_config().radarr
         if not r.url or not r.api_key:
             logger.info("radarr_sync: not configured; skipping")
             return

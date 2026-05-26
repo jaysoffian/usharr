@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from usharr import db
-from usharr.config import load_config
+from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ async def get_series(base: str, api_key: str) -> list[Series]:
 
 async def sync() -> None:
     try:
-        s = load_config().sonarr
+        s = get_config().sonarr
         if not s.url or not s.api_key:
             logger.info("sonarr_sync: not configured; skipping")
             return

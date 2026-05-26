@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 from usharr import db, plex
-from usharr.config import load_config
+from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def upsert(item: LibMetadata, path_map: dict[str, str]) -> str | None:
 async def sync() -> None:
     """Walk sections and upsert every movie + episode into plex_item."""
     try:
-        path_map = load_config().plex.path_map
+        path_map = get_config().plex.path_map
         try:
             _, server_url, _ = plex.load_auth()
         except plex.PlexNotLinkedError:

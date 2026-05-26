@@ -20,11 +20,11 @@ from pathlib import Path
 
 from usharr import db, plex, scanner
 from usharr.ardetector import detect
-from usharr.config import load_config
+from usharr.config import get_config
 
 
 async def cmd_probe(args: argparse.Namespace) -> int:
-    load_config()
+    get_config()
     logging.basicConfig(
         level=logging.DEBUG,
         stream=sys.stderr,
@@ -63,7 +63,7 @@ async def cmd_scan(_: argparse.Namespace) -> int:
 
 
 async def cmd_get(args: argparse.Namespace) -> int:
-    load_config()
+    get_config()
     db.init_db()
     try:
         row = db.get(args.path)
@@ -90,7 +90,7 @@ async def cmd_get(args: argparse.Namespace) -> int:
 
 
 async def cmd_auth(args: argparse.Namespace) -> int:
-    load_config()
+    get_config()
     db.init_db()
     try:
         if args.status:

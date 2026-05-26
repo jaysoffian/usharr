@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 from usharr import db, mediainfo, sidecars
 from usharr.ardetector import detect
-from usharr.config import load_config
+from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ async def walk_and_enqueue(*, reanalyze: bool, refresh: bool) -> None:
     the probe workers. Anything that needs ffmpeg / mediainfo lands in
     the per-pass queues.
     """
-    paths = load_config().all_paths
+    paths = get_config().all_paths
     logger.info(
         "scan walk starting across %d path(s) reanalyze=%s refresh=%s",
         len(paths),
