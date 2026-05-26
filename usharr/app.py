@@ -30,7 +30,7 @@ from usharr import (
     sonarr_sync,
 )
 from usharr import format as fmt
-from usharr.config import Config, load_config
+from usharr.config import INTERVAL_SECONDS, Config, load_config
 
 
 def configure_logging() -> None:
@@ -54,26 +54,35 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
+async def reconcile_loop() -> None:
+    """Full scan, then refresh Plex + *arr metadata in parallel, then sleep."""
+    while True:
+        await scanner.scan()
+        await asyncio.gather(
+            plex_sync.sync(),
+            bazarr_sync.sync(),
+            radarr_sync.sync(),
+            sonarr_sync.sync(),
+        )
+        await asyncio.sleep(INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     config = load_config()
     db.init_db()
     app.state.config = config
-    # USHARR_DB_RO: serve the DB read-only without spawning the scan /
-    # probe / sync loops. Used by `make dev` to test UI changes against
-    # a copied prod DB without trashing it (scan_loop deletes any rows
+    # USHARR_DB_RO: serve the DB read-only without spawning the reconcile
+    # / probe loops. Used by `make dev` to test UI changes against a
+    # copied prod DB without trashing it (scan deletes any rows
     # whose paths it can't find on disk).
     if os.environ.get("USHARR_DB_RO"):
         tasks: tuple[asyncio.Task, ...] = ()
         logger.info("usharr started in no-bg mode; db=%s", db.DB_PATH)
     else:
         tasks = (
-            asyncio.create_task(scanner.scan_loop(config)),
-            asyncio.create_task(scanner.probe_worker(config)),
-            asyncio.create_task(plex_sync.plex_sync_loop(config)),
-            asyncio.create_task(bazarr_sync.bazarr_sync_loop(config)),
-            asyncio.create_task(radarr_sync.radarr_sync_loop(config)),
-            asyncio.create_task(sonarr_sync.sonarr_sync_loop(config)),
+            asyncio.create_task(reconcile_loop()),
+            asyncio.create_task(scanner.probe_worker()),
         )
         logger.info("usharr started; library=%s", config.library)
     yield
@@ -862,7 +871,7 @@ async def webhook(form: Annotated[plex_sync.WebhookForm, Form()]) -> Response:
 @api.post("/task/scan")
 async def task_scan() -> dict:
     """Incremental library sweep: pick up new files, reprobe changed ones."""
-    spawn(scanner.full_scan(app.state.config))
+    spawn(scanner.scan())
     return {"triggered": True, "task": "scan"}
 
 
@@ -892,7 +901,7 @@ async def task_scan_one(file_path: str) -> dict:
 @api.post("/task/refresh")
 async def task_refresh_all() -> dict:
     """Force-refresh mediainfo on every file. AR cache preserved."""
-    spawn(scanner.full_scan(app.state.config, force_mediainfo=True))
+    spawn(scanner.scan(refresh=True))
     return {"triggered": True, "task": "refresh"}
 
 
@@ -901,14 +910,14 @@ async def task_refresh_one(file_path: str) -> dict:
     p = Path("/" + file_path)
     if not p.is_file():
         raise HTTPException(status_code=404, detail=f"not a file: {p}")
-    enqueued = scanner.enqueue_probe(p, force_mediainfo=True)
+    enqueued = scanner.enqueue_probe(p, refresh=True)
     return {"triggered": True, "task": "refresh", "path": str(p), "enqueued": enqueued}
 
 
 @api.post("/task/analyze")
 async def task_analyze_all() -> dict:
     """Force-reprobe AR and mediainfo on every file. Slow."""
-    spawn(scanner.full_scan(app.state.config, force=True))
+    spawn(scanner.scan(reanalyze=True))
     return {"triggered": True, "task": "analyze"}
 
 
@@ -917,38 +926,18 @@ async def task_analyze_one(file_path: str) -> dict:
     p = Path("/" + file_path)
     if not p.is_file():
         raise HTTPException(status_code=404, detail=f"not a file: {p}")
-    enqueued = scanner.enqueue_probe(p, force=True)
+    enqueued = scanner.enqueue_probe(p, reanalyze=True)
     return {"triggered": True, "task": "analyze", "path": str(p), "enqueued": enqueued}
-
-
-SYNC_HANDLERS = {
-    "plex": plex_sync.sync_once,
-    "bazarr": bazarr_sync.sync_once,
-    "radarr": radarr_sync.sync_once,
-    "sonarr": sonarr_sync.sync_once,
-}
 
 
 @api.post("/task/sync")
 async def task_sync_all() -> dict:
     """Kick off every external-service sync in parallel."""
-    config = app.state.config
-    for handler in SYNC_HANDLERS.values():
-        spawn(handler(config))
-    return {"triggered": True, "task": "sync", "services": list(SYNC_HANDLERS)}
-
-
-@api.post("/task/sync/{service}")
-async def task_sync_one(service: str) -> dict:
-    handler = SYNC_HANDLERS.get(service)
-    if handler is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"unknown service: {service} "
-            f"(expected one of {sorted(SYNC_HANDLERS)})",
-        )
-    spawn(handler(app.state.config))
-    return {"triggered": True, "task": "sync", "service": service}
+    spawn(plex_sync.sync())
+    spawn(bazarr_sync.sync())
+    spawn(radarr_sync.sync())
+    spawn(sonarr_sync.sync())
+    return {"triggered": True, "task": "sync"}
 
 
 app.include_router(api)

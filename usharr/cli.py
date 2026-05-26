@@ -20,7 +20,7 @@ from pathlib import Path
 from usharr import db, plex
 from usharr.ardetector import detect
 from usharr.config import load_config
-from usharr.scanner import full_scan
+from usharr.scanner import scan
 
 
 async def cmd_probe(args: argparse.Namespace) -> int:
@@ -40,13 +40,16 @@ async def cmd_probe(args: argparse.Namespace) -> int:
 
 
 async def cmd_scan(_: argparse.Namespace) -> int:
-    config = load_config()
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stderr,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+    )
     db.init_db()
     try:
-        summary = await full_scan(config)
+        await scan()
     finally:
         db.close_db()
-    print(json.dumps(summary, indent=2))
     return 0
 
 

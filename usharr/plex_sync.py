@@ -5,7 +5,6 @@ section, and upserts `plex_item` rows. Webhook endpoint (wired in
 ``app.py``) re-fetches one item by ratingKey and upserts.
 """
 
-import asyncio
 import logging
 import time
 from typing import Any
@@ -20,7 +19,7 @@ from pydantic import (
 )
 
 from usharr import db, plex
-from usharr.config import INTERVAL_SECONDS, Config
+from usharr.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -105,61 +104,50 @@ def upsert(item: LibMetadata, path_map: dict[str, str]) -> str | None:
     )
 
 
-async def sync_once(config: Config) -> dict:
+async def sync() -> None:
     """Walk sections and upsert every movie + episode into plex_item."""
     try:
-        _, server_url, _ = plex.load_auth()
-    except plex.PlexNotLinkedError:
-        logger.info("plex_sync: not linked; skipping")
-        return {"skipped": True}
-
-    server_url = server_url.rstrip("/")
-    sections_resp = await get_json(
-        SectionsResponse,
-        f"{server_url}/library/sections",
-    )
-
-    seen: set[str] = set()
-    upserted = 0
-
-    for section in sections_resp.container.directories:
-        if section.type == "movie":
-            url = f"{server_url}/library/sections/{section.key}/all"
-        elif section.type == "show":
-            url = f"{server_url}/library/sections/{section.key}/allLeaves"
-        else:
-            continue
+        path_map = load_config().plex.path_map
         try:
-            resp = await get_json(LibResponse, url)
-        except plex.PlexError as exc:
-            logger.warning("plex_sync %s: %s", section.title, exc)
-            continue
-        for item in resp.container.metadata:
-            if not item.rating_key:
+            _, server_url, _ = plex.load_auth()
+        except plex.PlexNotLinkedError:
+            logger.info("plex_sync: not linked; skipping")
+            return
+
+        server_url = server_url.rstrip("/")
+        sections_resp = await get_json(
+            SectionsResponse,
+            f"{server_url}/library/sections",
+        )
+
+        seen: set[str] = set()
+        upserted = 0
+
+        for section in sections_resp.container.directories:
+            if section.type == "movie":
+                url = f"{server_url}/library/sections/{section.key}/all"
+            elif section.type == "show":
+                url = f"{server_url}/library/sections/{section.key}/allLeaves"
+            else:
                 continue
-            seen.add(item.rating_key)
-            upsert(item, config.plex.path_map)
-            upserted += 1
+            try:
+                resp = await get_json(LibResponse, url)
+            except plex.PlexError as exc:
+                logger.warning("plex_sync %s: %s", section.title, exc)
+                continue
+            for item in resp.container.metadata:
+                if not item.rating_key:
+                    continue
+                seen.add(item.rating_key)
+                upsert(item, path_map)
+                upserted += 1
 
-    existing = db.list_plex_rating_keys()
-    stale = sorted(existing - seen)
-    removed = db.delete_plex_rating_keys(stale) if stale else 0
-    logger.info("plex_sync: upserted=%d removed=%d", upserted, removed)
-    return {"upserted": upserted, "removed": removed}
-
-
-async def plex_sync_loop(config: Config) -> None:
-    while True:
-        try:
-            await sync_once(config)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("plex_sync errored")
-        try:
-            await asyncio.sleep(INTERVAL_SECONDS)
-        except asyncio.CancelledError:
-            raise
+        existing = db.list_plex_rating_keys()
+        stale = sorted(existing - seen)
+        removed = db.delete_plex_rating_keys(stale) if stale else 0
+        logger.info("plex_sync: upserted=%d removed=%d", upserted, removed)
+    except Exception:
+        logger.exception("plex_sync errored")
 
 
 # --- webhook --------------------------------------------------------------

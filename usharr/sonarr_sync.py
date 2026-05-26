@@ -4,7 +4,6 @@ Deep-link route:
     {base}/series/{titleSlug}
 """
 
-import asyncio
 import logging
 import time
 
@@ -12,7 +11,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from usharr import db
-from usharr.config import INTERVAL_SECONDS, Config
+from usharr.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -44,47 +43,29 @@ async def get_series(base: str, api_key: str) -> list[Series]:
         raise RuntimeError(msg) from exc
 
 
-async def sync_once(config: Config) -> dict:
-    s = config.sonarr
-    if not s.url or not s.api_key:
-        logger.info("sonarr_sync: not configured; skipping")
-        return {"skipped": True}
-
+async def sync() -> None:
     try:
+        s = load_config().sonarr
+        if not s.url or not s.api_key:
+            logger.info("sonarr_sync: not configured; skipping")
+            return
+
         series = await get_series(s.url, s.api_key)
-    except Exception as exc:
-        logger.warning("sonarr_sync: fetch failed: %s", exc)
-        return {"error": str(exc)}
+        now = int(time.time())
 
-    now = int(time.time())
+        seen: set[int] = set()
+        for row in series:
+            seen.add(row.id)
+            db.upsert_sonarr_series(
+                series_id=row.id,
+                title_slug=row.title_slug or None,
+                remote_path=row.path or None,
+                path_map=s.path_map,
+                updated_at=now,
+            )
 
-    seen: set[int] = set()
-    for row in series:
-        seen.add(row.id)
-        db.upsert_sonarr_series(
-            series_id=row.id,
-            title_slug=row.title_slug or None,
-            remote_path=row.path or None,
-            path_map=s.path_map,
-            updated_at=now,
-        )
-
-    stale = sorted(db.list_sonarr_series_ids() - seen)
-    removed = db.delete_sonarr_series(stale) if stale else 0
-    summary = {"series": len(series), "removed": removed}
-    logger.info("sonarr_sync: %s", summary)
-    return summary
-
-
-async def sonarr_sync_loop(config: Config) -> None:
-    while True:
-        try:
-            await sync_once(config)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("sonarr_sync errored")
-        try:
-            await asyncio.sleep(INTERVAL_SECONDS)
-        except asyncio.CancelledError:
-            raise
+        stale = sorted(db.list_sonarr_series_ids() - seen)
+        removed = db.delete_sonarr_series(stale) if stale else 0
+        logger.info("sonarr_sync: series=%d removed=%d", len(series), removed)
+    except Exception:
+        logger.exception("sonarr_sync errored")

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from usharr import db, mediainfo, sidecars
 from usharr.ardetector import detect
-from usharr.config import INTERVAL_SECONDS, Config
+from usharr.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -17,19 +17,19 @@ VIDEO_EXTENSIONS = frozenset(
     {".avi", ".iso", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".ts", ".webm"}
 )
 
-# At most one probe runs at a time. scan_loop and the webhook probe_worker
+# At most one probe runs at a time. scan and the webhook probe_worker
 # both go through probe_and_store, which acquires this lock for the
 # ffmpeg/mediainfo pass.
 probe_lock = asyncio.Lock()
 
-# Serializes full_scan. Without this, scan_loop's periodic pass and a
-# manual trigger (Refresh / Analyze) interleave at every await point in
+# Serializes scan. Without this, the periodic pass and a manual
+# trigger (Refresh / Analyze) interleave at every await point in
 # probe_and_store — files arrive out of order and each gets probed once
 # per concurrent scan.
 scan_lock = asyncio.Lock()
 
 # Bounded queue fed by webhook PUTs; drained by a single probe_worker task
-# started in app.lifespan. Tuple: (path, force, force_mediainfo).
+# started in app.lifespan. Tuple: (path, reanalyze, refresh).
 QUEUE_MAX = 50
 queue: asyncio.Queue[tuple[Path, bool, bool]] = asyncio.Queue(maxsize=QUEUE_MAX)
 
@@ -61,12 +61,12 @@ def is_scanned(path: Path) -> bool:
 def enqueue_probe(
     path: Path,
     *,
-    force: bool = False,
-    force_mediainfo: bool = False,
+    reanalyze: bool = False,
+    refresh: bool = False,
 ) -> bool:
     """Non-blocking enqueue. Returns False if the queue is full."""
     try:
-        queue.put_nowait((path, force, force_mediainfo))
+        queue.put_nowait((path, reanalyze, refresh))
     except asyncio.QueueFull:
         logger.info("enqueue_probe: QueueFull")
         return False
@@ -74,19 +74,16 @@ def enqueue_probe(
     return True
 
 
-async def probe_worker(config: Config) -> None:
+async def probe_worker() -> None:
     """Drain the probe queue, serially. Cancel-safe."""
     while True:
-        path, force, force_mediainfo = await queue.get()
+        path, reanalyze, refresh = await queue.get()
         try:
             await probe_and_store(
-                config,
                 path,
-                force=force,
-                force_mediainfo=force_mediainfo,
+                reanalyze=reanalyze,
+                refresh=refresh,
             )
-        except asyncio.CancelledError:
-            raise
         except Exception:
             logger.exception("queued probe failed for %s", path)
         finally:
@@ -109,16 +106,15 @@ def iter_video_files(paths: list[str]) -> list[Path]:
 
 
 async def probe_and_store(
-    config: Config,
     path: Path,
     *,
-    force: bool = False,
-    force_mediainfo: bool = False,
+    reanalyze: bool = False,
+    refresh: bool = False,
 ) -> tuple[db.MediaFileRow | None, bool]:
     """Probe ``path`` (unless cached) and upsert. Returns (row, probed).
 
-    ``force`` runs both ardetector and mediainfo regardless of cache state.
-    ``force_mediainfo`` only forces the (cheap) mediainfo pass; cached
+    ``reanalyze`` runs both ardetector and mediainfo regardless of cache state.
+    ``refresh`` re-runs only the (cheap) mediainfo pass; cached
     ardetector output is preserved — useful when track metadata has
     changed upstream (e.g. tags edited) but AR is stable.
     """
@@ -143,18 +139,18 @@ async def probe_and_store(
 
     # Decide up front what each pass would actually do, then use those
     # decisions to pick the short-circuit path. Short-circuits must honor
-    # every force flag, not just `force`.
+    # every flag, not just `reanalyze`.
     #
     # Mediainfo is cheap, so we retry if we don't have its row yet
     # (e.g. after a schema bump that DELETEd from `mediainfo`).
     # Ardetector is slow and deterministic — if it failed on this exact
-    # file bytes, it'll fail again. Only attempt ardetector when forced,
-    # when the video changed, or when there's no ardetector row yet
+    # file bytes, it'll fail again. Only attempt ardetector when reanalyze
+    # is set, when the video changed, or when there's no ardetector row yet
     # (covers both never-discovered and "stub" media_file rows from
-    # full_scan's pre-pass). Users can `Redetect` per-title or
+    # scan's pre-pass). Users can `Redetect` per-title or
     # library-wide to retry persistent failures.
-    do_mediainfo = force or force_mediainfo or not video_unchanged or mi_row is None
-    do_ardetector = force or not video_unchanged or ar_row is None
+    do_mediainfo = reanalyze or refresh or not video_unchanged or mi_row is None
+    do_ardetector = reanalyze or not video_unchanged or ar_row is None
 
     # Make sure media_file is current before we touch the per-pass tables
     # (the FKs require it). New file → insert; changed file → refresh
@@ -310,95 +306,80 @@ async def run_ardetector(path: Path, now: int) -> None:
         db.set_mediainfo_duration(str(path), result.duration)
 
 
-async def full_scan(
-    config: Config,
+async def scan(
     *,
-    force: bool = False,
-    force_mediainfo: bool = False,
-) -> dict:
+    reanalyze: bool = False,
+    refresh: bool = False,
+) -> None:
     """Reconcile DB with the media tree; probe new/changed files.
 
-    ``force`` re-runs both tools on every file (slow — ardetector samples
-    frames). ``force_mediainfo`` re-reads track metadata but preserves
+    ``reanalyze`` re-runs both tools on every file (slow — ardetector samples
+    frames). ``refresh`` re-reads track metadata but preserves
     cached AR data (fast).
     """
-    if scan_lock.locked():
-        logger.info("full_scan waiting for in-flight scan to finish")
-    async with scan_lock:
-        paths = config.all_paths
-        logger.info(
-            "Starting full scan across %d path(s) force=%s force_mediainfo=%s",
-            len(paths),
-            force,
-            force_mediainfo,
-        )
-        start = time.monotonic()
-        disk_files = iter_video_files(paths)
-        disk_paths = {str(p) for p in disk_files}
-
-        removed = sorted(db.list_paths() - disk_paths)
-        if removed:
-            n = db.delete_paths(removed)
-            logger.info("Removed %d stale row(s) from DB", n)
-
-        # Stub-insert pass: surface every disk file in the library view
-        # by name immediately, so a fresh / large library isn't blank
-        # while the (slow) mediainfo + ardetector passes catch up. A
-        # stub is just a `media_file` row with no companion `mediainfo`
-        # / `ardetector` row; the loop below probes those in.
-        now = int(time.time())
-        stub_count = 0
-        for p in disk_files:
-            try:
-                st = p.stat()
-            except OSError as exc:
-                logger.warning("stat failed for %s: %s", p, exc)
-                continue
-            sidecar_paths = sidecars.find_sidecars(p)
-            if db.insert_media_file(
-                path=str(p),
-                size_bytes=st.st_size,
-                mtime_ns=st.st_mtime_ns,
-                sidecars_mtime_ns=sidecars.mtime_ns_max(sidecar_paths),
-                discovered_at=now,
-            ):
-                stub_count += 1
-        if stub_count:
-            logger.info("Inserted %d stub row(s)", stub_count)
-
-        probed_count = 0
-        for p in disk_files:
-            _, probed = await probe_and_store(
-                config,
-                p,
-                force=force,
-                force_mediainfo=force_mediainfo,
+    try:
+        if scan_lock.locked():
+            logger.info("waiting for in-flight scan to finish")
+        async with scan_lock:
+            paths = load_config().all_paths
+            logger.info(
+                "Starting full scan across %d path(s) reanalyze=%s refresh=%s",
+                len(paths),
+                reanalyze,
+                refresh,
             )
-            if probed:
-                probed_count += 1
+            start = time.monotonic()
+            disk_files = iter_video_files(paths)
+            disk_paths = {str(p) for p in disk_files}
 
-        summary = {
-            "files": len(disk_files),
-            "removed": len(removed),
-            "stubs": stub_count,
-            "probed": probed_count,
-            "cached": len(disk_files) - probed_count,
-            "elapsed_seconds": round(time.monotonic() - start, 1),
-        }
-        logger.info("Full scan complete: %s", summary)
-        return summary
+            removed = sorted(db.list_paths() - disk_paths)
+            if removed:
+                n = db.delete_paths(removed)
+                logger.info("Removed %d stale row(s) from DB", n)
 
+            # Stub-insert pass: surface every disk file in the library view
+            # by name immediately, so a fresh / large library isn't blank
+            # while the (slow) mediainfo + ardetector passes catch up. A
+            # stub is just a `media_file` row with no companion `mediainfo`
+            # / `ardetector` row; the loop below probes those in.
+            now = int(time.time())
+            stub_count = 0
+            for p in disk_files:
+                try:
+                    st = p.stat()
+                except OSError as exc:
+                    logger.warning("stat failed for %s: %s", p, exc)
+                    continue
+                sidecar_paths = sidecars.find_sidecars(p)
+                if db.insert_media_file(
+                    path=str(p),
+                    size_bytes=st.st_size,
+                    mtime_ns=st.st_mtime_ns,
+                    sidecars_mtime_ns=sidecars.mtime_ns_max(sidecar_paths),
+                    discovered_at=now,
+                ):
+                    stub_count += 1
+            if stub_count:
+                logger.info("Inserted %d stub row(s)", stub_count)
 
-async def scan_loop(config: Config) -> None:
-    """Run full_scan forever, sleeping between passes. Cancel-safe."""
-    while True:
-        try:
-            await full_scan(config)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Full scan errored")
-        try:
-            await asyncio.sleep(INTERVAL_SECONDS)
-        except asyncio.CancelledError:
-            raise
+            probed_count = 0
+            for p in disk_files:
+                _, probed = await probe_and_store(
+                    p,
+                    reanalyze=reanalyze,
+                    refresh=refresh,
+                )
+                if probed:
+                    probed_count += 1
+
+            logger.info(
+                "Full scan complete: files=%d removed=%d stubs=%d probed=%d cached=%d elapsed=%.1fs",
+                len(disk_files),
+                len(removed),
+                stub_count,
+                probed_count,
+                len(disk_files) - probed_count,
+                time.monotonic() - start,
+            )
+    except Exception:
+        logger.exception("scan errored")
