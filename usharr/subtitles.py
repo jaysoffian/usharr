@@ -1,4 +1,4 @@
-"""Sibling subtitle file detection + filename parsing."""
+"""External subtitle file detection + filename parsing."""
 
 import logging
 from pathlib import Path
@@ -8,9 +8,9 @@ from usharr.langs import norm_lang
 
 logger = logging.getLogger(__name__)
 
-SIDECAR_EXTENSIONS = frozenset({".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt"})
+SUBTITLE_EXTENSIONS = frozenset({".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt"})
 
-SUB_CODEC_BY_EXT = {
+CODEC_BY_EXT = {
     ".srt": "SRT",
     ".ass": "ASS",
     ".ssa": "SSA",
@@ -19,13 +19,13 @@ SUB_CODEC_BY_EXT = {
     ".vtt": "WebVTT",
 }
 
-# Filename tail tokens that flag the sub rather than naming its language.
+# Filename tail tokens that flag the subtitle rather than naming its language.
 FORCED_TOKENS = {"forced"}
 SDH_TOKENS = {"sdh", "hi", "cc"}
 
 
-def find_sidecars(video_path: Path) -> list[Path]:
-    """Return subtitle sidecar files sharing the video's stem."""
+def find_subtitles(video_path: Path) -> list[Path]:
+    """Return external subtitle files sharing the video's stem."""
     stem = video_path.stem
     parent = video_path.parent
     out: list[Path] = []
@@ -33,7 +33,7 @@ def find_sidecars(video_path: Path) -> list[Path]:
         for p in parent.iterdir():
             if not p.is_file():
                 continue
-            if p.suffix.lower() not in SIDECAR_EXTENSIONS:
+            if p.suffix.lower() not in SUBTITLE_EXTENSIONS:
                 continue
             if not p.name.startswith(stem):
                 continue
@@ -41,7 +41,7 @@ def find_sidecars(video_path: Path) -> list[Path]:
                 continue
             out.append(p)
     except OSError as exc:
-        logger.debug("sidecar scan failed for %s: %s", parent, exc)
+        logger.debug("subtitle scan failed for %s: %s", parent, exc)
     out.sort(key=lambda p: p.name.lower())
     return out
 
@@ -59,13 +59,13 @@ def mtime_ns_max(paths: list[Path]) -> int | None:
     return best
 
 
-def parse_sidecar(video_stem: str, sidecar: Path, idx: int) -> SubtitleTrackRow:
-    """Produce a subtitle_track row for a sidecar file."""
-    suffix = sidecar.suffix.lower()
-    codec = SUB_CODEC_BY_EXT.get(suffix, suffix.lstrip(".").upper())
+def parse_subtitle(video_stem: str, path: Path, idx: int) -> SubtitleTrackRow:
+    """Produce a subtitle_track row for an external subtitle file."""
+    suffix = path.suffix.lower()
+    codec = CODEC_BY_EXT.get(suffix, suffix.lstrip(".").upper())
 
-    tail = sidecar.name.removeprefix(video_stem)
-    tail = tail.removesuffix(sidecar.suffix)
+    tail = path.name.removeprefix(video_stem)
+    tail = tail.removesuffix(path.suffix)
     tail = tail.removeprefix(".")
     tokens = [t for t in tail.split(".") if t]
 
@@ -87,7 +87,7 @@ def parse_sidecar(video_stem: str, sidecar: Path, idx: int) -> SubtitleTrackRow:
     return SubtitleTrackRow(
         idx=idx,
         source="external",
-        file_path=str(sidecar),
+        file_path=str(path),
         codec=codec,
         language=lang,
         title=None,

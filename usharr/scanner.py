@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from usharr import bazarr_sync, db, plex_sync, radarr_sync, sidecars, sonarr_sync
+from usharr import bazarr_sync, db, plex_sync, radarr_sync, sonarr_sync, subtitles
 from usharr.config import get_config
 from usharr.probers import ArdetectorProber, MediainfoProber, update_external_subs
 
@@ -139,7 +139,7 @@ class Scanner:
         """Reconcile DB with the media tree; enqueue per-pass work as needed.
 
         Maintains the ``media_file`` rows inline (stub-insert new, update
-        stat on changed) and handles sidecar-only updates without
+        stat on changed) and handles subtitle-only updates without
         involving the probers. Anything that needs ffmpeg / mediainfo
         lands on the appropriate prober's queue.
         """
@@ -164,7 +164,7 @@ class Scanner:
         stubs = 0
         mi_enqueued = 0
         ar_enqueued = 0
-        sidecar_only = 0
+        subtitle_only = 0
 
         for p in disk_files:
             try:
@@ -173,8 +173,8 @@ class Scanner:
                 logger.warning("stat failed for %s: %s", p, exc)
                 continue
 
-            sidecar_paths = sidecars.find_sidecars(p)
-            sidecar_mtime = sidecars.mtime_ns_max(sidecar_paths)
+            subtitle_paths = subtitles.find_subtitles(p)
+            subtitles_mtime = subtitles.mtime_ns_max(subtitle_paths)
             mf = db.get(str(p))
             mi_row = db.get_mediainfo(str(p)) if mf is not None else None
             ar_row = db.get_ardetector(str(p)) if mf is not None else None
@@ -184,8 +184,8 @@ class Scanner:
                 and mf.size_bytes == st.st_size
                 and mf.mtime_ns == st.st_mtime_ns
             )
-            sidecars_unchanged = (
-                mf is not None and mf.sidecars_mtime_ns == sidecar_mtime
+            subtitles_unchanged = (
+                mf is not None and mf.sidecars_mtime_ns == subtitles_mtime
             )
 
             if mf is None:
@@ -193,16 +193,16 @@ class Scanner:
                     path=str(p),
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
-                    sidecars_mtime_ns=sidecar_mtime,
+                    sidecars_mtime_ns=subtitles_mtime,
                     discovered_at=now,
                 )
                 stubs += 1
-            elif not video_unchanged or not sidecars_unchanged:
+            elif not video_unchanged or not subtitles_unchanged:
                 db.update_media_file_stat(
                     path=str(p),
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
-                    sidecars_mtime_ns=sidecar_mtime,
+                    sidecars_mtime_ns=subtitles_mtime,
                 )
 
             # Mediainfo is cheap: retry when its row is missing (e.g. after
@@ -220,21 +220,21 @@ class Scanner:
                 self.ardetector.enqueue(p, force=reanalyze)
                 ar_enqueued += 1
 
-            # Sidecar-only update: probes don't need to run, but external
-            # subs do — re-derive inline.
-            if not do_mediainfo and not do_ardetector and not sidecars_unchanged:
-                update_external_subs(p, sidecar_paths)
-                sidecar_only += 1
+            # Subtitle-only update: probes don't need to run, but
+            # external subs do — re-derive inline.
+            if not do_mediainfo and not do_ardetector and not subtitles_unchanged:
+                update_external_subs(p, subtitle_paths)
+                subtitle_only += 1
 
         logger.info(
             "scan walk complete: files=%d removed=%d stubs=%d "
-            "mi_enqueued=%d ar_enqueued=%d sidecar_only=%d elapsed=%.1fs",
+            "mi_enqueued=%d ar_enqueued=%d subtitle_only=%d elapsed=%.1fs",
             len(disk_files),
             len(removed),
             stubs,
             mi_enqueued,
             ar_enqueued,
-            sidecar_only,
+            subtitle_only,
             time.monotonic() - start,
         )
 
