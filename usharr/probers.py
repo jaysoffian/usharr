@@ -23,8 +23,6 @@ class ProbeRequest(NamedTuple):
 class Prober:
     """Long-lived per-pass worker. Subclass and implement ``probe()``."""
 
-    name: str
-
     def __init__(self) -> None:
         self.queue: asyncio.Queue[ProbeRequest] = asyncio.Queue()
 
@@ -37,8 +35,8 @@ class Prober:
             req = await self.queue.get()
             try:
                 await self.probe(req.path, req.force)
-            except Exception:
-                logger.exception("%s failed for %s", self.name, req.path)
+            except Exception as e:
+                logger.exception("%s: %s", req.path, str(e))
             finally:
                 self.queue.task_done()
 
@@ -50,8 +48,6 @@ class MediainfoProber(Prober):
     """Cheap track-metadata pass. Retried on missing rows; on failure,
     preserves cached track metadata so the UI keeps showing what we had.
     """
-
-    name = "mediainfo"
 
     async def probe(self, path: Path, force: bool) -> None:
         try:
@@ -128,8 +124,6 @@ class ArdetectorProber(Prober):
     records the error; cached aspect data isn't preserved (a re-run on
     the same bytes would just fail again).
     """
-
-    name = "ardetector"
 
     async def probe(self, path: Path, force: bool) -> None:
         try:
