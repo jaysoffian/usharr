@@ -185,7 +185,7 @@ class Scanner:
                 and mf.mtime_ns == st.st_mtime_ns
             )
             subtitles_unchanged = (
-                mf is not None and mf.sidecars_mtime_ns == subtitles_mtime
+                mf is not None and mf.subtitles_mtime_ns == subtitles_mtime
             )
 
             if mf is None:
@@ -193,7 +193,7 @@ class Scanner:
                     path=str(p),
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
-                    sidecars_mtime_ns=subtitles_mtime,
+                    subtitles_mtime_ns=subtitles_mtime,
                     discovered_at=now,
                 )
                 stubs += 1
@@ -202,7 +202,7 @@ class Scanner:
                     path=str(p),
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
-                    sidecars_mtime_ns=subtitles_mtime,
+                    subtitles_mtime_ns=subtitles_mtime,
                 )
 
             # Mediainfo is cheap: retry when its row is missing (e.g. after

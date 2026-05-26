@@ -7,7 +7,7 @@ View-layer code that needs to add template fields should
 ``dataclasses.asdict(row)`` first and work in dict-space from there.
 
 Schema overview:
-  * ``media_file`` is the discovery row — path/size/mtime/sidecars +
+  * ``media_file`` is the discovery row — path/size/mtime/subtitles +
     ``discovered_at``. A row exists iff we've seen the file on disk.
   * ``mediainfo`` holds the cheap track-metadata pass (container,
     video_*, duration). Row presence ⇒ at least one attempt; ``error``
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS media_file (
     path              TEXT PRIMARY KEY,
     size_bytes        INTEGER NOT NULL,
     mtime_ns          INTEGER NOT NULL,
-    sidecars_mtime_ns INTEGER,
+    subtitles_mtime_ns INTEGER,
     discovered_at     INTEGER NOT NULL
 ) WITHOUT ROWID;
 
@@ -160,7 +160,7 @@ CREATE INDEX IF NOT EXISTS sonarr_series_local_folder ON sonarr_series(local_fol
 
 
 # Bump when mediainfo extraction gains fields so existing rows get re-probed
-# on next scan. Aspect data, sidecar subs, and plex_item/bazarr_* rows are
+# on next scan. Aspect data, external subs, and plex_item/bazarr_* rows are
 # preserved — only the mediainfo pass reruns.
 MEDIAINFO_SCHEMA_VERSION = 7
 
@@ -173,7 +173,7 @@ class MediaFileRow:
     path: str
     size_bytes: int
     mtime_ns: int
-    sidecars_mtime_ns: int | None
+    subtitles_mtime_ns: int | None
     discovered_at: int
 
 
@@ -257,7 +257,7 @@ class LibraryRow:
     path: str
     size_bytes: int
     mtime_ns: int
-    sidecars_mtime_ns: int | None
+    subtitles_mtime_ns: int | None
     discovered_at: int
     # mediainfo fields (NULL when no mediainfo row yet — i.e. stub).
     mediainfo_probed_at: int | None
@@ -332,8 +332,25 @@ def init_db() -> None:
     db.execute("PRAGMA foreign_keys=ON")
     db.executescript(CREATE_TABLES)
     db.executescript(CREATE_INDEXES)
+    maybe_rename_subtitles_column()
     maybe_reprobe_on_schema_bump()
     logger.info("Opened DB at %s", DB_PATH)
+
+
+def maybe_rename_subtitles_column() -> None:
+    """One-shot rename of media_file.sidecars_mtime_ns -> subtitles_mtime_ns.
+
+    No-op on fresh DBs (CREATE TABLE already used the new name) and on
+    DBs that have already been migrated.
+    """
+    conn = get_conn()
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(media_file)").fetchall()}
+    if "sidecars_mtime_ns" not in cols:
+        return
+    conn.execute(
+        "ALTER TABLE media_file RENAME COLUMN sidecars_mtime_ns TO subtitles_mtime_ns"
+    )
+    logger.info("Renamed media_file.sidecars_mtime_ns to subtitles_mtime_ns")
 
 
 def maybe_reprobe_on_schema_bump() -> None:
@@ -438,7 +455,7 @@ MEDIA_COLS = (
     "path",
     "size_bytes",
     "mtime_ns",
-    "sidecars_mtime_ns",
+    "subtitles_mtime_ns",
     "discovered_at",
 )
 
@@ -465,7 +482,7 @@ def insert_media_file(
     path: str,
     size_bytes: int,
     mtime_ns: int,
-    sidecars_mtime_ns: int | None,
+    subtitles_mtime_ns: int | None,
     discovered_at: int,
 ) -> bool:
     """Insert a media_file row. No-op (returns False) if `path` already exists.
@@ -475,9 +492,9 @@ def insert_media_file(
     """
     cur = get_conn().execute(
         "INSERT OR IGNORE INTO media_file"
-        " (path, size_bytes, mtime_ns, sidecars_mtime_ns, discovered_at)"
+        " (path, size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at)"
         " VALUES (?, ?, ?, ?, ?)",
-        (path, size_bytes, mtime_ns, sidecars_mtime_ns, discovered_at),
+        (path, size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at),
     )
     return (cur.rowcount or 0) > 0
 
@@ -487,14 +504,14 @@ def update_media_file_stat(
     path: str,
     size_bytes: int,
     mtime_ns: int,
-    sidecars_mtime_ns: int | None,
+    subtitles_mtime_ns: int | None,
 ) -> None:
     """Refresh the discovery-side stat fields after a file change."""
     get_conn().execute(
         "UPDATE media_file"
-        " SET size_bytes = ?, mtime_ns = ?, sidecars_mtime_ns = ?"
+        " SET size_bytes = ?, mtime_ns = ?, subtitles_mtime_ns = ?"
         " WHERE path = ?",
-        (size_bytes, mtime_ns, sidecars_mtime_ns, path),
+        (size_bytes, mtime_ns, subtitles_mtime_ns, path),
     )
 
 
@@ -559,7 +576,7 @@ def upsert_mediainfo(
     when only the error/probed_at fields are being refreshed without
     new track data — see ``set_mediainfo_duration``).
     External subtitles aren't touched by this function — they live or
-    die with the sidecar files (see ``update_external_subtitles``).
+    die with the subtitle files (see ``update_external_subtitles``).
     """
     placeholders = ", ".join("?" * len(MEDIAINFO_COLS))
     cols = ", ".join(MEDIAINFO_COLS)
@@ -789,7 +806,7 @@ def update_external_subtitles(
 ) -> None:
     """Replace only the external subtitle_track rows.
 
-    Caller is responsible for keeping ``media_file.sidecars_mtime_ns``
+    Caller is responsible for keeping ``media_file.subtitles_mtime_ns``
     in sync via ``update_media_file_stat`` / ``insert_media_file`` —
     discovery state lives on the discovery row.
     """
