@@ -460,11 +460,11 @@ MEDIA_COLS = (
 )
 
 
-def get(path: str) -> MediaFileRow | None:
+def get(path: Path | str) -> MediaFileRow | None:
     cols = ", ".join(MEDIA_COLS)
     row = (
         get_conn()
-        .execute(f"SELECT {cols} FROM media_file WHERE path = ?", (path,))
+        .execute(f"SELECT {cols} FROM media_file WHERE path = ?", (str(path),))
         .fetchone()
     )
     if row is None:
@@ -479,7 +479,7 @@ def get_by_remote_path(remote: str, path_map: dict[str, str]) -> MediaFileRow | 
 
 def insert_media_file(
     *,
-    path: str,
+    path: Path,
     size_bytes: int,
     mtime_ns: int,
     subtitles_mtime_ns: int | None,
@@ -494,14 +494,14 @@ def insert_media_file(
         "INSERT OR IGNORE INTO media_file"
         " (path, size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at)"
         " VALUES (?, ?, ?, ?, ?)",
-        (path, size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at),
+        (str(path), size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at),
     )
     return (cur.rowcount or 0) > 0
 
 
 def update_media_file_stat(
     *,
-    path: str,
+    path: Path,
     size_bytes: int,
     mtime_ns: int,
     subtitles_mtime_ns: int | None,
@@ -511,7 +511,7 @@ def update_media_file_stat(
         "UPDATE media_file"
         " SET size_bytes = ?, mtime_ns = ?, subtitles_mtime_ns = ?"
         " WHERE path = ?",
-        (size_bytes, mtime_ns, subtitles_mtime_ns, path),
+        (size_bytes, mtime_ns, subtitles_mtime_ns, str(path)),
     )
 
 
@@ -536,11 +536,11 @@ MEDIAINFO_COLS = (
 )
 
 
-def get_mediainfo(path: str) -> MediainfoRow | None:
+def get_mediainfo(path: Path | str) -> MediainfoRow | None:
     cols = ", ".join(MEDIAINFO_COLS)
     row = (
         get_conn()
-        .execute(f"SELECT {cols} FROM mediainfo WHERE path = ?", (path,))
+        .execute(f"SELECT {cols} FROM mediainfo WHERE path = ?", (str(path),))
         .fetchone()
     )
     if row is None:
@@ -550,7 +550,7 @@ def get_mediainfo(path: str) -> MediainfoRow | None:
 
 def upsert_mediainfo(
     *,
-    path: str,
+    path: Path,
     probed_at: int,
     error: str | None,
     container: str | None,
@@ -578,10 +578,11 @@ def upsert_mediainfo(
     External subtitles aren't touched by this function — they live or
     die with the subtitle files (see ``update_external_subtitles``).
     """
+    path_str = str(path)
     placeholders = ", ".join("?" * len(MEDIAINFO_COLS))
     cols = ", ".join(MEDIAINFO_COLS)
     values = (
-        path,
+        path_str,
         probed_at,
         error,
         container,
@@ -605,7 +606,7 @@ def upsert_mediainfo(
             values,
         )
         if audio is not None:
-            conn.execute("DELETE FROM audio_track WHERE path = ?", (path,))
+            conn.execute("DELETE FROM audio_track WHERE path = ?", (path_str,))
             for t in audio:
                 conn.execute(
                     "INSERT INTO audio_track"
@@ -615,7 +616,7 @@ def upsert_mediainfo(
                     "  compression_mode)"
                     " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
-                        path,
+                        path_str,
                         t.idx,
                         t.codec,
                         t.channels,
@@ -636,7 +637,7 @@ def upsert_mediainfo(
         if internal_subs is not None:
             conn.execute(
                 "DELETE FROM subtitle_track WHERE path = ? AND source = 'internal'",
-                (path,),
+                (path_str,),
             )
             for t in internal_subs:
                 conn.execute(
@@ -645,7 +646,7 @@ def upsert_mediainfo(
                     "  is_default, is_forced, is_sdh)"
                     " VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (
-                        path,
+                        path_str,
                         t.idx,
                         "internal",
                         t.file_path,
@@ -663,14 +664,14 @@ def upsert_mediainfo(
         raise
 
 
-def set_mediainfo_duration(path: str, duration: float) -> None:
+def set_mediainfo_duration(path: Path, duration: float) -> None:
     """Backfill mediainfo.duration from the ardetector pass when mediainfo
     didn't get one (the AR sampler measures runtime as a side effect).
     No-op if no mediainfo row exists for `path`.
     """
     get_conn().execute(
         "UPDATE mediainfo SET duration = ? WHERE path = ? AND duration IS NULL",
-        (duration, path),
+        (duration, str(path)),
     )
 
 
@@ -686,11 +687,11 @@ ARDETECTOR_COLS = (
 )
 
 
-def get_ardetector(path: str) -> ArdetectorRow | None:
+def get_ardetector(path: Path | str) -> ArdetectorRow | None:
     cols = ", ".join(ARDETECTOR_COLS)
     row = (
         get_conn()
-        .execute(f"SELECT {cols} FROM ardetector WHERE path = ?", (path,))
+        .execute(f"SELECT {cols} FROM ardetector WHERE path = ?", (str(path),))
         .fetchone()
     )
     if row is None:
@@ -700,7 +701,7 @@ def get_ardetector(path: str) -> ArdetectorRow | None:
 
 def upsert_ardetector(
     *,
-    path: str,
+    path: Path,
     probed_at: int,
     error: str | None,
     aspect_primary: float | None,
@@ -712,7 +713,7 @@ def upsert_ardetector(
     get_conn().execute(
         f"INSERT OR REPLACE INTO ardetector ({cols}) VALUES ({placeholders})",
         (
-            path,
+            str(path),
             probed_at,
             error,
             aspect_primary,
@@ -786,13 +787,13 @@ def get_subtitle_tracks(path: str) -> list[SubtitleTrackRow]:
     ]
 
 
-def count_internal_subs(path: str) -> int:
+def count_internal_subs(path: Path) -> int:
     row = (
         get_conn()
         .execute(
             "SELECT COUNT(*) FROM subtitle_track"
             " WHERE path = ? AND source = 'internal'",
-            (path,),
+            (str(path),),
         )
         .fetchone()
     )
@@ -801,7 +802,7 @@ def count_internal_subs(path: str) -> int:
 
 def update_external_subtitles(
     *,
-    path: str,
+    path: Path,
     subtitles: Iterable[SubtitleTrackRow],
 ) -> None:
     """Replace only the external subtitle_track rows.
@@ -810,12 +811,13 @@ def update_external_subtitles(
     in sync via ``update_media_file_stat`` / ``insert_media_file`` —
     discovery state lives on the discovery row.
     """
+    path_str = str(path)
     conn = get_conn()
     conn.execute("BEGIN")
     try:
         conn.execute(
             "DELETE FROM subtitle_track WHERE path = ? AND source = 'external'",
-            (path,),
+            (path_str,),
         )
         for t in subtitles:
             conn.execute(
@@ -824,7 +826,7 @@ def update_external_subtitles(
                 "  is_default, is_forced, is_sdh)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
-                    path,
+                    path_str,
                     t.idx,
                     "external",
                     t.file_path,

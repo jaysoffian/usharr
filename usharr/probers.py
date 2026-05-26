@@ -60,13 +60,13 @@ class MediainfoProber(Prober):
             logger.warning("stat failed for %s: %s", path, exc)
             return
 
-        mf = db.get(str(path))
+        mf = db.get(path)
         if mf is None:
             logger.warning("mediainfo: no media_file row for %s", path)
             return
 
         video_unchanged = mf.size_bytes == st.st_size and mf.mtime_ns == st.st_mtime_ns
-        cached = db.get_mediainfo(str(path))
+        cached = db.get_mediainfo(path)
         if not force and video_unchanged and cached is not None:
             return
 
@@ -77,7 +77,7 @@ class MediainfoProber(Prober):
         except Exception as exc:
             logger.warning("mediainfo failed for %s: %s", path, exc)
             db.upsert_mediainfo(
-                path=str(path),
+                path=path,
                 probed_at=now,
                 error=str(exc)[:500],
                 container=cached.container if cached else None,
@@ -98,7 +98,7 @@ class MediainfoProber(Prober):
         else:
             v = mi.video
             db.upsert_mediainfo(
-                path=str(path),
+                path=path,
                 probed_at=now,
                 error=None,
                 container=mi.container,
@@ -138,13 +138,13 @@ class ArdetectorProber(Prober):
             logger.warning("stat failed for %s: %s", path, exc)
             return
 
-        mf = db.get(str(path))
+        mf = db.get(path)
         if mf is None:
             logger.warning("ardetector: no media_file row for %s", path)
             return
 
         video_unchanged = mf.size_bytes == st.st_size and mf.mtime_ns == st.st_mtime_ns
-        if not force and video_unchanged and db.get_ardetector(str(path)) is not None:
+        if not force and video_unchanged and db.get_ardetector(path) is not None:
             return
 
         logger.info("ardetector: %s", path)
@@ -154,7 +154,7 @@ class ArdetectorProber(Prober):
         except Exception as exc:
             logger.warning("ardetector failed for %s: %s", path, exc)
             db.upsert_ardetector(
-                path=str(path),
+                path=path,
                 probed_at=now,
                 error=str(exc)[:500],
                 aspect_primary=None,
@@ -164,7 +164,7 @@ class ArdetectorProber(Prober):
             return
 
         db.upsert_ardetector(
-            path=str(path),
+            path=path,
             probed_at=now,
             error=None,
             aspect_primary=result.primary_aspect,
@@ -176,14 +176,14 @@ class ArdetectorProber(Prober):
         # the mediainfo row doesn't exist yet — that pass will fill its
         # own.
         if result.duration is not None:
-            db.set_mediainfo_duration(str(path), result.duration)
+            db.set_mediainfo_duration(path, result.duration)
 
 
 def update_external_subs(path: Path, subtitle_paths: list[Path]) -> None:
     """Re-derive external sub rows numbered after the current internal block."""
-    internal_count = db.count_internal_subs(str(path))
+    internal_count = db.count_internal_subs(path)
     external_subs = [
         subtitles.parse_subtitle(path.stem, s, internal_count + i)
         for i, s in enumerate(subtitle_paths)
     ]
-    db.update_external_subtitles(path=str(path), subtitles=external_subs)
+    db.update_external_subtitles(path=path, subtitles=external_subs)

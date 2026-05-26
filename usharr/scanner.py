@@ -156,9 +156,9 @@ class Scanner:
 
             subtitle_paths = subtitles.find_subtitles(p)
             subtitles_mtime = subtitles.mtime_ns_max(subtitle_paths)
-            mf = db.get(str(p))
-            mi_row = db.get_mediainfo(str(p)) if mf is not None else None
-            ar_row = db.get_ardetector(str(p)) if mf is not None else None
+            mf = db.get(p)
+            mi_row = db.get_mediainfo(p) if mf is not None else None
+            ar_row = db.get_ardetector(p) if mf is not None else None
 
             video_unchanged = (
                 mf is not None
@@ -171,7 +171,7 @@ class Scanner:
 
             if mf is None:
                 db.insert_media_file(
-                    path=str(p),
+                    path=p,
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
                     subtitles_mtime_ns=subtitles_mtime,
@@ -180,7 +180,7 @@ class Scanner:
                 stubs += 1
             elif not video_unchanged or not subtitles_unchanged:
                 db.update_media_file_stat(
-                    path=str(p),
+                    path=p,
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
                     subtitles_mtime_ns=subtitles_mtime,
