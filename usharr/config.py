@@ -11,9 +11,6 @@ from ruamel.yaml import YAML
 
 logger = logging.getLogger(__name__)
 
-# How often background loops (scan + sync) wake up to run another pass.
-INTERVAL_SECONDS = 3600
-
 yaml = YAML()
 yaml.preserve_quotes = True
 

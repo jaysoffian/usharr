@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from usharr import bazarr_sync, db, plex_sync, radarr_sync, sidecars, sonarr_sync
-from usharr.config import INTERVAL_SECONDS, get_config
+from usharr.config import get_config
 from usharr.probers import ArdetectorProber, MediainfoProber, update_external_subs
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 VIDEO_EXTENSIONS = frozenset(
     {".avi", ".iso", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".ts", ".webm"}
 )
+
+# How often scan_forever wakes up between scan + sync passes.
+INTERVAL_SECONDS = 3600
 
 
 class ScanRequest(NamedTuple):
@@ -57,10 +60,10 @@ class Scanner:
     def start(self) -> None:
         """Spawn every long-lived worker. Call once from lifespan / CLI."""
         self.tasks = (
-            asyncio.create_task(self.mediainfo.probe_forever()),
-            asyncio.create_task(self.ardetector.probe_forever()),
+            asyncio.create_task(self.mediainfo.process_queue_forever()),
+            asyncio.create_task(self.ardetector.process_queue_forever()),
+            asyncio.create_task(self.process_queue_forever()),
             asyncio.create_task(self.scan_forever()),
-            asyncio.create_task(self.reconcile_forever()),
         )
 
     async def stop(self) -> None:
@@ -72,7 +75,7 @@ class Scanner:
                 await t
         self.tasks = ()
 
-    async def reconcile_forever(self) -> None:
+    async def scan_forever(self) -> None:
         """Periodic full reconcile: scan, then refresh Plex + *arr metadata."""
         while True:
             self.enqueue_scan()
@@ -85,7 +88,7 @@ class Scanner:
             )
             await asyncio.sleep(INTERVAL_SECONDS)
 
-    async def scan_forever(self) -> None:
+    async def process_queue_forever(self) -> None:
         """Drain scan requests forever. Coalesces rapid re-triggers."""
         while True:
             req = await self.queue.get()

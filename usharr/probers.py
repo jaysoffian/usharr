@@ -31,7 +31,7 @@ class Prober:
     def enqueue(self, path: Path, *, force: bool = False) -> None:
         self.queue.put_nowait(ProbeRequest(path, force))
 
-    async def probe_forever(self) -> None:
+    async def process_queue_forever(self) -> None:
         """Drain the queue forever. Cancel-safe."""
         while True:
             req = await self.queue.get()
