@@ -1,13 +1,14 @@
 """Media tree walker. Owns the per-pass probers it feeds."""
 
 import asyncio
+import contextlib
 import logging
 import time
 from pathlib import Path
 from typing import NamedTuple
 
-from usharr import db, sidecars
-from usharr.config import get_config
+from usharr import bazarr_sync, db, plex_sync, radarr_sync, sidecars, sonarr_sync
+from usharr.config import INTERVAL_SECONDS, get_config
 from usharr.probers import ArdetectorProber, MediainfoProber, update_external_subs
 
 logger = logging.getLogger(__name__)
@@ -31,12 +32,18 @@ class Scanner:
         self.mediainfo = MediainfoProber()
         self.ardetector = ArdetectorProber()
         self.queue: asyncio.Queue[ScanRequest] = asyncio.Queue()
+        self.tasks: tuple[asyncio.Task, ...] = ()
 
-    def enqueue(self, *, reanalyze: bool = False, refresh: bool = False) -> None:
+    def enqueue_scan(
+        self,
+        *,
+        reanalyze: bool = False,
+        refresh: bool = False,
+    ) -> None:
         """Schedule a full-library scan. Coalesces with any pending request."""
         self.queue.put_nowait(ScanRequest(reanalyze=reanalyze, refresh=refresh))
 
-    def enqueue_probe(
+    def enqueue_path(
         self,
         path: Path,
         *,
@@ -47,7 +54,38 @@ class Scanner:
         self.mediainfo.enqueue(path, force=reanalyze or refresh)
         self.ardetector.enqueue(path, force=reanalyze)
 
-    async def run(self) -> None:
+    def start(self) -> None:
+        """Spawn every long-lived worker. Call once from lifespan / CLI."""
+        self.tasks = (
+            asyncio.create_task(self.mediainfo.probe_forever()),
+            asyncio.create_task(self.ardetector.probe_forever()),
+            asyncio.create_task(self.scan_forever()),
+            asyncio.create_task(self.reconcile_forever()),
+        )
+
+    async def stop(self) -> None:
+        """Cancel every worker task and wait for it to exit."""
+        for t in self.tasks:
+            t.cancel()
+        for t in self.tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
+        self.tasks = ()
+
+    async def reconcile_forever(self) -> None:
+        """Periodic full reconcile: scan, then refresh Plex + *arr metadata."""
+        while True:
+            self.enqueue_scan()
+            await self.queue.join()
+            await asyncio.gather(
+                plex_sync.sync(),
+                bazarr_sync.sync(),
+                radarr_sync.sync(),
+                sonarr_sync.sync(),
+            )
+            await asyncio.sleep(INTERVAL_SECONDS)
+
+    async def scan_forever(self) -> None:
         """Drain scan requests forever. Coalesces rapid re-triggers."""
         while True:
             req = await self.queue.get()
@@ -67,15 +105,6 @@ class Scanner:
             finally:
                 self.queue.task_done()
 
-    async def scan(self, *, reanalyze: bool = False, refresh: bool = False) -> None:
-        """Enqueue a scan and wait for the walk to complete.
-
-        Returns once every disk file has a media_file row and per-pass
-        work is enqueued. Probes continue draining in the background.
-        """
-        self.enqueue(reanalyze=reanalyze, refresh=refresh)
-        await self.queue.join()
-
     async def scan_and_wait(
         self,
         *,
@@ -83,7 +112,8 @@ class Scanner:
         refresh: bool = False,
     ) -> None:
         """Walk + wait for both probers to settle. For the CLI."""
-        await self.scan(reanalyze=reanalyze, refresh=refresh)
+        self.enqueue_scan(reanalyze=reanalyze, refresh=refresh)
+        await self.queue.join()
         await self.mediainfo.wait()
         await self.ardetector.wait()
 

@@ -1,7 +1,5 @@
 """FastAPI app: endpoints + background scan loop."""
 
-import asyncio
-import contextlib
 import dataclasses
 import datetime as dt
 import json
@@ -20,16 +18,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from usharr import (
-    bazarr_sync,
-    db,
-    plex,
-    plex_sync,
-    radarr_sync,
-    sonarr_sync,
-)
+from usharr import db, plex, plex_sync
 from usharr import format as fmt
-from usharr.config import INTERVAL_SECONDS, get_config
+from usharr.config import get_config
 from usharr.scanner import scanner
 
 
@@ -54,23 +45,6 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
-async def reconcile_loop() -> None:
-    """Full scan, then refresh Plex + *arr metadata in parallel, then sleep.
-
-    Only waits for the walk before syncing — per-file probes continue in
-    the background, in parallel with the syncs.
-    """
-    while True:
-        await scanner.scan()
-        await asyncio.gather(
-            plex_sync.sync(),
-            bazarr_sync.sync(),
-            radarr_sync.sync(),
-            sonarr_sync.sync(),
-        )
-        await asyncio.sleep(INTERVAL_SECONDS)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db.init_db()
@@ -80,22 +54,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # copied prod DB without trashing it (scan deletes any rows
     # whose paths it can't find on disk).
     if os.environ.get("USHARR_DB_RO"):
-        tasks: tuple[asyncio.Task, ...] = ()
         logger.info("usharr started in no-bg mode; db=%s", db.DB_PATH)
     else:
-        tasks = (
-            asyncio.create_task(reconcile_loop()),
-            asyncio.create_task(scanner.run()),
-            asyncio.create_task(scanner.mediainfo.run()),
-            asyncio.create_task(scanner.ardetector.run()),
-        )
+        scanner.start()
         logger.info("usharr started; library=%s", get_config().library)
     yield
-    for t in tasks:
-        t.cancel()
-    for t in tasks:
-        with contextlib.suppress(asyncio.CancelledError):
-            await t
+    await scanner.stop()
     db.close_db()
     logger.info("usharr shutdown complete")
 
@@ -855,7 +819,7 @@ async def webhook(form: Annotated[plex_sync.WebhookForm, Form()]) -> Response:
     path_map = get_config().plex.path_map
 
     if local_path := await plex_sync.library_new(rating_key, path_map):
-        scanner.enqueue_probe(Path(local_path))
+        scanner.enqueue_path(Path(local_path))
 
     return Response(status_code=204)
 
@@ -870,33 +834,33 @@ def lookup_path(file_path: str) -> Path:
 @api.post("/task/scan")
 async def task_scan() -> Response:
     """Incremental library sweep: pick up new files, reprobe changed ones."""
-    scanner.enqueue()
+    scanner.enqueue_scan()
     return Response(status_code=202)
 
 
 @api.post("/task/refresh")
 async def task_refresh() -> Response:
     """Force-refresh mediainfo on every file. AR cache preserved."""
-    scanner.enqueue(refresh=True)
+    scanner.enqueue_scan(refresh=True)
     return Response(status_code=202)
 
 
 @api.post("/task/refresh/{file_path:path}")
 async def task_refresh_path(file_path: str) -> Response:
-    scanner.enqueue_probe(lookup_path(file_path), refresh=True)
+    scanner.enqueue_path(lookup_path(file_path), refresh=True)
     return Response(status_code=202)
 
 
 @api.post("/task/analyze")
 async def task_analyze() -> Response:
     """Force-reprobe AR and mediainfo on every file. Slow."""
-    scanner.enqueue(reanalyze=True)
+    scanner.enqueue_scan(reanalyze=True)
     return Response(status_code=202)
 
 
 @api.post("/task/analyze/{file_path:path}")
 async def task_analyze_path(file_path: str) -> Response:
-    scanner.enqueue_probe(lookup_path(file_path), reanalyze=True)
+    scanner.enqueue_path(lookup_path(file_path), reanalyze=True)
     return Response(status_code=202)
 
 
