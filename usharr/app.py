@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from usharr import db, plex, plex_sync
 from usharr import format as fmt
 from usharr.config import get_config
-from usharr.scanner import scanner
+from usharr.scanner import ScanRequest, scanner
 
 
 def configure_logging() -> None:
@@ -819,7 +819,7 @@ async def webhook(form: Annotated[plex_sync.WebhookForm, Form()]) -> Response:
     path_map = get_config().plex.path_map
 
     if local_path := await plex_sync.library_new(rating_key, path_map):
-        scanner.enqueue_path(Path(local_path))
+        scanner.enqueue(ScanRequest(Path(local_path)))
 
     return Response(status_code=204)
 
@@ -834,33 +834,33 @@ def lookup_path(file_path: str) -> Path:
 @api.post("/task/scan")
 async def task_scan() -> Response:
     """Incremental library sweep: pick up new files, reprobe changed ones."""
-    scanner.enqueue_scan()
+    scanner.enqueue(ScanRequest())
     return Response(status_code=202)
 
 
 @api.post("/task/refresh")
 async def task_refresh() -> Response:
     """Force-refresh mediainfo on every file. AR cache preserved."""
-    scanner.enqueue_scan(refresh=True)
+    scanner.enqueue(ScanRequest(refresh=True))
     return Response(status_code=202)
 
 
 @api.post("/task/refresh/{file_path:path}")
 async def task_refresh_path(file_path: str) -> Response:
-    scanner.enqueue_path(lookup_path(file_path), refresh=True)
+    scanner.enqueue(ScanRequest(lookup_path(file_path), refresh=True))
     return Response(status_code=202)
 
 
 @api.post("/task/analyze")
 async def task_analyze() -> Response:
     """Force-reprobe AR and mediainfo on every file. Slow."""
-    scanner.enqueue_scan(reanalyze=True)
+    scanner.enqueue(ScanRequest(analyze=True))
     return Response(status_code=202)
 
 
 @api.post("/task/analyze/{file_path:path}")
 async def task_analyze_path(file_path: str) -> Response:
-    scanner.enqueue_path(lookup_path(file_path), reanalyze=True)
+    scanner.enqueue(ScanRequest(lookup_path(file_path), analyze=True))
     return Response(status_code=202)
 
 

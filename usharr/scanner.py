@@ -22,14 +22,21 @@ INTERVAL_SECONDS = 3600
 
 
 class ScanRequest(NamedTuple):
-    reanalyze: bool = False
+    path: Path | None = None
     refresh: bool = False
+    analyze: bool = False
+
+    @property
+    def force_refresh(self) -> bool:
+        return self.refresh or self.analyze
+
+    @property
+    def force_detect(self) -> bool:
+        return self.analyze
 
 
 class Scanner:
-    """Coalescing library walker. Owns the per-pass probers it feeds.
-    ``run()`` is the long-lived worker started from lifespan.
-    """
+    """Library Scanner"""
 
     def __init__(self) -> None:
         self.mediainfo = MediainfoProber()
@@ -37,25 +44,17 @@ class Scanner:
         self.queue: asyncio.Queue[ScanRequest] = asyncio.Queue()
         self.tasks: tuple[asyncio.Task, ...] = ()
 
-    def enqueue_scan(
+    def enqueue(
         self,
-        *,
-        reanalyze: bool = False,
-        refresh: bool = False,
+        /,
+        req: ScanRequest,
     ) -> None:
-        """Schedule a full-library scan. Coalesces with any pending request."""
-        self.queue.put_nowait(ScanRequest(reanalyze=reanalyze, refresh=refresh))
-
-    def enqueue_path(
-        self,
-        path: Path,
-        *,
-        reanalyze: bool = False,
-        refresh: bool = False,
-    ) -> None:
-        """Enqueue a single file on both probers. Probers cache-check on dequeue."""
-        self.mediainfo.enqueue(path, force=reanalyze or refresh)
-        self.ardetector.enqueue(path, force=reanalyze)
+        """Add ScanRequest to queue."""
+        if req.path:
+            self.mediainfo.enqueue(req.path, force=req.force_refresh)
+            self.ardetector.enqueue(req.path, force=req.force_detect)
+        else:
+            self.queue.put_nowait(req)
 
     def start(self) -> None:
         """Spawn every long-lived worker. Call once from lifespan / CLI."""
@@ -78,7 +77,7 @@ class Scanner:
     async def scan_forever(self) -> None:
         """Periodic full reconcile: scan, then refresh Plex + *arr metadata."""
         while True:
-            self.enqueue_scan()
+            self.enqueue(ScanRequest())
             await self.queue.join()
             await asyncio.gather(
                 plex_sync.sync(),
@@ -92,17 +91,17 @@ class Scanner:
         """Drain scan requests forever. Coalesces rapid re-triggers."""
         while True:
             req = await self.queue.get()
-            # Merge any queued-up requests so 100 rapid clicks become one
-            # walk with the strongest flag-union of what was asked for.
+            # Coalesce queued requests to a single scan
             while not self.queue.empty():
-                more = self.queue.get_nowait()
+                next_req = self.queue.get_nowait()
                 req = ScanRequest(
-                    reanalyze=req.reanalyze or more.reanalyze,
-                    refresh=req.refresh or more.refresh,
+                    analyze=req.analyze or next_req.analyze,
+                    refresh=req.refresh or next_req.refresh,
+                    # req.path is always None
                 )
                 self.queue.task_done()
             try:
-                await self.walk(reanalyze=req.reanalyze, refresh=req.refresh)
+                await self.scan(req)
             except Exception:
                 logger.exception("scan walk errored")
             finally:
@@ -123,20 +122,14 @@ class Scanner:
             )
         return sorted(found, key=lambda p: str(p).lower())
 
-    async def walk(self, *, reanalyze: bool, refresh: bool) -> None:
-        """Reconcile DB with the media tree; enqueue per-pass work as needed.
-
-        Maintains the ``media_file`` rows inline (stub-insert new, update
-        stat on changed) and handles subtitle-only updates without
-        involving the probers. Anything that needs ffmpeg / mediainfo
-        lands on the appropriate prober's queue.
-        """
+    async def scan(self, /, req: ScanRequest) -> None:
+        """Scan for new/updated media files and/or refresh/analyze existing files."""
         paths = get_config().all_paths
         logger.info(
-            "scan walk starting across %d path(s) reanalyze=%s refresh=%s",
+            "scan walk starting across %d path(s) refresh=%s analyze=%s",
             len(paths),
-            reanalyze,
-            refresh,
+            req.refresh,
+            req.analyze,
         )
         start = time.monotonic()
 
@@ -198,14 +191,14 @@ class Scanner:
             # slow and deterministic — if it failed on these exact bytes,
             # it'll fail again, so only re-attempt when forced, when the
             # video changed, or when there's no row yet.
-            do_mediainfo = reanalyze or refresh or not video_unchanged or mi_row is None
-            do_ardetector = reanalyze or not video_unchanged or ar_row is None
+            do_mediainfo = req.force_refresh or not video_unchanged or mi_row is None
+            do_ardetector = req.force_detect or not video_unchanged or ar_row is None
 
             if do_mediainfo:
-                self.mediainfo.enqueue(p, force=reanalyze or refresh)
+                self.mediainfo.enqueue(p, force=req.force_refresh)
                 mi_enqueued += 1
             if do_ardetector:
-                self.ardetector.enqueue(p, force=reanalyze)
+                self.ardetector.enqueue(p, force=req.force_detect)
                 ar_enqueued += 1
 
             # Subtitle-only update: probes don't need to run, but
