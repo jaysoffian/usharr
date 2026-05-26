@@ -108,12 +108,12 @@ class Scanner:
                 self.queue.task_done()
 
     @staticmethod
-    def iter_video_files(paths: list[str]) -> list[Path]:
+    def walk_videos(roots: list[str]) -> list[Path]:
         found: list[Path] = []
-        for root in paths:
+        for root in roots:
             root_path = Path(root)
             if not root_path.is_dir():
-                logger.warning("Scan path %s is missing or not a directory", root)
+                logger.warning("Scan root %s is missing or not a directory", root)
                 continue
             found.extend(
                 p
@@ -124,97 +124,70 @@ class Scanner:
 
     async def scan(self, /, req: ScanRequest) -> None:
         """Scan for new/updated media files and/or refresh/analyze existing files."""
-        paths = get_config().all_paths
+        roots = get_config().all_paths
         logger.info(
-            "scan walk starting across %d path(s) refresh=%s analyze=%s",
-            len(paths),
+            "scan walk starting across %d root(s) refresh=%s analyze=%s",
+            len(roots),
             req.refresh,
             req.analyze,
         )
         start = time.monotonic()
 
-        disk_files = self.iter_video_files(paths)
-        disk_paths = {str(p) for p in disk_files}
-
-        removed = sorted(db.list_paths() - disk_paths)
+        videos = self.walk_videos(roots)
+        removed = db.delete_orphans(videos)
         if removed:
-            n = db.delete_paths(removed)
-            logger.info("Removed %d stale row(s) from DB", n)
+            logger.info("Removed %d stale row(s) from DB", removed)
 
         now = int(time.time())
         stubs = 0
-        mi_enqueued = 0
-        ar_enqueued = 0
         subtitle_only = 0
 
-        for p in disk_files:
+        for path in videos:
             try:
-                st = p.stat()
+                st = path.stat()
             except OSError as exc:
-                logger.warning("stat failed for %s: %s", p, exc)
+                logger.warning("stat failed for %s: %s", path, exc)
                 continue
 
-            subtitle_paths = subtitles.find_subtitles(p)
+            subtitle_paths = subtitles.find_subtitles(path)
             subtitles_mtime = subtitles.mtime_ns_max(subtitle_paths)
-            mf = db.get(p)
-            mi_row = db.get_mediainfo(p) if mf is not None else None
-            ar_row = db.get_ardetector(p) if mf is not None else None
-
-            video_unchanged = (
-                mf is not None
-                and mf.size_bytes == st.st_size
-                and mf.mtime_ns == st.st_mtime_ns
-            )
-            subtitles_unchanged = (
-                mf is not None and mf.subtitles_mtime_ns == subtitles_mtime
-            )
+            mf = db.get(path)
 
             if mf is None:
-                db.insert_media_file(
-                    path=p,
+                stubs += 1
+                video_changed = subtitles_changed = True
+            else:
+                video_changed = (
+                    mf.size_bytes != st.st_size or mf.mtime_ns != st.st_mtime_ns
+                )
+                subtitles_changed = mf.subtitles_mtime_ns != subtitles_mtime
+
+            if mf is None or video_changed or subtitles_changed:
+                db.upsert_media_file(
+                    path=path,
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
                     subtitles_mtime_ns=subtitles_mtime,
                     discovered_at=now,
                 )
-                stubs += 1
-            elif not video_unchanged or not subtitles_unchanged:
-                db.update_media_file_stat(
-                    path=p,
-                    size_bytes=st.st_size,
-                    mtime_ns=st.st_mtime_ns,
-                    subtitles_mtime_ns=subtitles_mtime,
-                )
 
-            # Mediainfo is cheap: retry when its row is missing (e.g. after
-            # a schema bump that DELETEd from `mediainfo`). Ardetector is
-            # slow and deterministic — if it failed on these exact bytes,
-            # it'll fail again, so only re-attempt when forced, when the
-            # video changed, or when there's no row yet.
-            do_mediainfo = req.force_refresh or not video_unchanged or mi_row is None
-            do_ardetector = req.force_detect or not video_unchanged or ar_row is None
+            # Probers do their own change detection and skip unchanged
+            # files; just enqueue everything.
+            self.mediainfo.enqueue(path, force=req.force_refresh)
+            self.ardetector.enqueue(path, force=req.force_detect)
 
-            if do_mediainfo:
-                self.mediainfo.enqueue(p, force=req.force_refresh)
-                mi_enqueued += 1
-            if do_ardetector:
-                self.ardetector.enqueue(p, force=req.force_detect)
-                ar_enqueued += 1
-
-            # Subtitle-only update: probes don't need to run, but
-            # external subs do — re-derive inline.
-            if not do_mediainfo and not do_ardetector and not subtitles_unchanged:
-                update_external_subs(p, subtitle_paths)
+            # When only subs changed, the mediainfo prober will skip and
+            # won't refresh external subs — handle that case here.
+            if not video_changed and subtitles_changed and not req.force_refresh:
+                update_external_subs(path, subtitle_paths)
                 subtitle_only += 1
 
         logger.info(
-            "scan walk complete: files=%d removed=%d stubs=%d "
-            "mi_enqueued=%d ar_enqueued=%d subtitle_only=%d elapsed=%.1fs",
-            len(disk_files),
-            len(removed),
+            "scan walk complete: videos=%d removed=%d stubs=%d "
+            "subtitle_only=%d elapsed=%.1fs",
+            len(videos),
+            removed,
             stubs,
-            mi_enqueued,
-            ar_enqueued,
             subtitle_only,
             time.monotonic() - start,
         )

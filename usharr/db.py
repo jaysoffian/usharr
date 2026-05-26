@@ -477,41 +477,27 @@ def get_by_remote_path(remote: str, path_map: dict[str, str]) -> MediaFileRow | 
     return get(map_remote_path(remote, path_map))
 
 
-def insert_media_file(
+def upsert_media_file(
     *,
     path: Path,
     size_bytes: int,
     mtime_ns: int,
     subtitles_mtime_ns: int | None,
     discovered_at: int,
-) -> bool:
-    """Insert a media_file row. No-op (returns False) if `path` already exists.
-
-    A row's existence means "we've seen this file"; the mediainfo /
-    ardetector tables fill in later.
-    """
-    cur = get_conn().execute(
-        "INSERT OR IGNORE INTO media_file"
-        " (path, size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (str(path), size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at),
-    )
-    return (cur.rowcount or 0) > 0
-
-
-def update_media_file_stat(
-    *,
-    path: Path,
-    size_bytes: int,
-    mtime_ns: int,
-    subtitles_mtime_ns: int | None,
 ) -> None:
-    """Refresh the discovery-side stat fields after a file change."""
+    """Insert a media_file row, or refresh stat fields if it already exists.
+
+    `discovered_at` is set on first insert and preserved on update.
+    """
     get_conn().execute(
-        "UPDATE media_file"
-        " SET size_bytes = ?, mtime_ns = ?, subtitles_mtime_ns = ?"
-        " WHERE path = ?",
-        (size_bytes, mtime_ns, subtitles_mtime_ns, str(path)),
+        "INSERT INTO media_file"
+        " (path, size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at)"
+        " VALUES (?, ?, ?, ?, ?)"
+        " ON CONFLICT(path) DO UPDATE SET"
+        " size_bytes = excluded.size_bytes,"
+        " mtime_ns = excluded.mtime_ns,"
+        " subtitles_mtime_ns = excluded.subtitles_mtime_ns",
+        (str(path), size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at),
     )
 
 
@@ -951,13 +937,15 @@ def library_tracks(
     return audio, subtitle
 
 
-def delete_paths(paths: list[str]) -> int:
-    if not paths:
+def delete_orphans(present: Iterable[Path | str]) -> int:
+    """Delete media_file rows whose path is not in `present`."""
+    orphans = sorted(list_paths() - {str(p) for p in present})
+    if not orphans:
         return 0
     conn = get_conn()
     total = 0
-    for i in range(0, len(paths), 500):
-        chunk = paths[i : i + 500]
+    for i in range(0, len(orphans), 500):
+        chunk = orphans[i : i + 500]
         placeholders = ",".join("?" * len(chunk))
         cur = conn.execute(
             f"DELETE FROM media_file WHERE path IN ({placeholders})",
