@@ -18,9 +18,10 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from usharr import db, plex, scanner
+from usharr import db, plex
 from usharr.ardetector import detect
 from usharr.config import get_config
+from usharr.scanner import scanner
 
 
 async def cmd_probe(args: argparse.Namespace) -> int:
@@ -47,11 +48,12 @@ async def cmd_scan(_: argparse.Namespace) -> int:
     )
     db.init_db()
     workers = [
-        asyncio.create_task(scanner.mediainfo_worker()),
-        asyncio.create_task(scanner.ardetector_worker()),
+        asyncio.create_task(scanner.run()),
+        asyncio.create_task(scanner.mediainfo.run()),
+        asyncio.create_task(scanner.ardetector.run()),
     ]
     try:
-        await scanner.scan_and_drain()
+        await scanner.scan_and_wait()
     finally:
         for w in workers:
             w.cancel()

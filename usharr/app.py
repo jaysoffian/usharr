@@ -26,11 +26,11 @@ from usharr import (
     plex,
     plex_sync,
     radarr_sync,
-    scanner,
     sonarr_sync,
 )
 from usharr import format as fmt
 from usharr.config import INTERVAL_SECONDS, get_config
+from usharr.scanner import scanner
 
 
 def configure_logging() -> None:
@@ -55,9 +55,13 @@ logger = logging.getLogger(__name__)
 
 
 async def reconcile_loop() -> None:
-    """Full scan, then refresh Plex + *arr metadata in parallel, then sleep."""
+    """Full scan, then refresh Plex + *arr metadata in parallel, then sleep.
+
+    Only waits for the walk before syncing — per-file probes continue in
+    the background, in parallel with the syncs.
+    """
     while True:
-        await scanner.scan_and_drain()
+        await scanner.scan()
         await asyncio.gather(
             plex_sync.sync(),
             bazarr_sync.sync(),
@@ -81,9 +85,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         tasks = (
             asyncio.create_task(reconcile_loop()),
-            asyncio.create_task(scanner.scan_worker()),
-            asyncio.create_task(scanner.mediainfo_worker()),
-            asyncio.create_task(scanner.ardetector_worker()),
+            asyncio.create_task(scanner.run()),
+            asyncio.create_task(scanner.mediainfo.run()),
+            asyncio.create_task(scanner.ardetector.run()),
         )
         logger.info("usharr started; library=%s", get_config().library)
     yield
@@ -851,7 +855,7 @@ async def webhook(form: Annotated[plex_sync.WebhookForm, Form()]) -> Response:
     path_map = get_config().plex.path_map
 
     if local_path := await plex_sync.library_new(rating_key, path_map):
-        scanner.request_probe(Path(local_path))
+        scanner.enqueue_probe(Path(local_path))
 
     return Response(status_code=204)
 
@@ -866,33 +870,33 @@ def one_path(file_path: str) -> Path:
 @api.post("/task/scan")
 async def task_scan() -> Response:
     """Incremental library sweep: pick up new files, reprobe changed ones."""
-    scanner.request_scan()
+    scanner.enqueue()
     return Response(status_code=202)
 
 
 @api.post("/task/refresh")
 async def task_refresh() -> Response:
     """Force-refresh mediainfo on every file. AR cache preserved."""
-    scanner.request_scan(refresh=True)
+    scanner.enqueue(refresh=True)
     return Response(status_code=202)
 
 
 @api.post("/task/refresh/{file_path:path}")
 async def task_refresh_path(file_path: str) -> Response:
-    scanner.request_probe(one_path(file_path), refresh=True)
+    scanner.enqueue_probe(one_path(file_path), refresh=True)
     return Response(status_code=202)
 
 
 @api.post("/task/analyze")
 async def task_analyze() -> Response:
     """Force-reprobe AR and mediainfo on every file. Slow."""
-    scanner.request_scan(reanalyze=True)
+    scanner.enqueue(reanalyze=True)
     return Response(status_code=202)
 
 
 @api.post("/task/analyze/{file_path:path}")
 async def task_analyze_path(file_path: str) -> Response:
-    scanner.request_probe(one_path(file_path), reanalyze=True)
+    scanner.enqueue_probe(one_path(file_path), reanalyze=True)
     return Response(status_code=202)
 
 
