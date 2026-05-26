@@ -930,14 +930,4 @@ async def task_analyze_one(file_path: str) -> dict:
     return {"triggered": True, "task": "analyze", "path": str(p), "enqueued": enqueued}
 
 
-@api.post("/task/sync")
-async def task_sync_all() -> dict:
-    """Kick off every external-service sync in parallel."""
-    spawn(plex_sync.sync())
-    spawn(bazarr_sync.sync())
-    spawn(radarr_sync.sync())
-    spawn(sonarr_sync.sync())
-    return {"triggered": True, "task": "sync"}
-
-
 app.include_router(api)
