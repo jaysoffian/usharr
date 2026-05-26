@@ -42,10 +42,6 @@ class Prober:
             finally:
                 self.queue.task_done()
 
-    async def wait(self) -> None:
-        """Block until every enqueued item has been processed."""
-        await self.queue.join()
-
     async def probe(self, path: Path, force: bool) -> None:
         raise NotImplementedError
 

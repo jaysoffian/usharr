@@ -108,18 +108,6 @@ class Scanner:
             finally:
                 self.queue.task_done()
 
-    async def scan_and_wait(
-        self,
-        *,
-        reanalyze: bool = False,
-        refresh: bool = False,
-    ) -> None:
-        """Walk + wait for both probers to settle. For the CLI."""
-        self.enqueue_scan(reanalyze=reanalyze, refresh=refresh)
-        await self.queue.join()
-        await self.mediainfo.wait()
-        await self.ardetector.wait()
-
     @staticmethod
     def iter_video_files(paths: list[str]) -> list[Path]:
         found: list[Path] = []
