@@ -31,7 +31,7 @@ This would allow Usharr to match `/media/Movies/Brazil (1985)/Brazil (1985).mkv`
 
 ### Application menu
 
--  **Scan Library**: Scan for added/removed files and synchronize with Plex and *arr integrations. Run mediainfo and AR analysis on new files.
+-  **Scan Library**: Scan for added/removed files. Mediainfo and AR analysis run on new or changed files. (Sync with Plex and *arr integrations happens automatically on the hourly reconcile cycle.)
 -  **Refresh Library**: Re-run `mediainfo` on every file.
 -  **Analyze Library…**: Re-run `mediainfo` and perform fresh AR analysis on every file.
 
@@ -84,8 +84,11 @@ Example response:
 ```json
 {
   "path": "/media/Movies/Dune 2021.mkv",
-  "detected_at": "2026-04-22T06:10:09Z",
-  "error": null,
+  "discovered_at": "2026-04-22T06:10:09Z",
+  "mediainfo_probed_at": "2026-04-22T06:10:12Z",
+  "ardetector_probed_at": "2026-04-22T06:13:48Z",
+  "mediainfo_error": null,
+  "ardetector_error": null,
   "container": "Matroska",
   "duration": 9534.2,
   "video": {
@@ -132,24 +135,14 @@ curl -X POST http://usharr:8555/api/task/refresh
 # Force re-probe everything, including ardetector cropdetect. Slow.
 curl -X POST http://usharr:8555/api/task/analyze
 
-# Single-file variants. /scan/<path> is idempotent — it enqueues only
-# when the DB row isn't already fresh (useful from a Sonarr/Radarr
-# "on import" hook). /refresh and /analyze always force.
-curl -X POST 'http://usharr:8555/api/task/scan/media/Movies/Dune%202021.mkv'
+# Single-file variants of refresh / analyze (always force).
 curl -X POST 'http://usharr:8555/api/task/refresh/media/Movies/Dune%202021.mkv'
 curl -X POST 'http://usharr:8555/api/task/analyze/media/Movies/Dune%202021.mkv'
-
-# Trigger sync with integrations all or individually:
-curl -X POST http://usharr:8555/api/task/sync
-curl -X POST http://usharr:8555/api/task/sync/plex
-curl -X POST http://usharr:8555/api/task/sync/bazarr
-curl -X POST http://usharr:8555/api/task/sync/radarr
-curl -X POST http://usharr:8555/api/task/sync/sonarr
 ```
 
 ### Webhooks
 
-Point Plex Server → Settings → Webhooks at `http://usharr:8555/api/webhook`. On `library.new` / `library.update` / `library.on.deck`, Usharr refreshes the referenced `plex_item` and enqueues a probe on the resolved local path.
+Point Plex Server → Settings → Webhooks at `http://usharr:8555/api/webhook`. On `library.new`, Usharr resolves the referenced `plex_item` to its local path and enqueues a probe for it.
 
 ## Plex
 
@@ -166,17 +159,6 @@ usharr auth --reset    # forget the stored token
 ```
 
 Usharr matches media files against Plex's reported paths by longest path suffix.
-
-## CLI
-
-The container image exposes a CLI:
-
-```bash
-usharr probe /media/Movies/Dune\ 2021.mkv   # probe one file; print JSON; no DB writes
-usharr scan                                  # run one full-scan pass and exit
-usharr get /media/Movies/Dune\ 2021.mkv     # print the DB row, if any
-usharr auth                                  # link to Plex (see above)
-```
 
 ## Podman
 
