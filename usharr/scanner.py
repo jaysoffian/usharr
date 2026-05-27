@@ -51,8 +51,8 @@ class Scanner:
     ) -> None:
         """Add ScanRequest to queue."""
         if req.path:
-            self.mediainfo.enqueue(req.path, force=req.force_refresh)
-            self.ardetector.enqueue(req.path, force=req.force_detect)
+            self.mediainfo.enqueue(req.path)
+            self.ardetector.enqueue(req.path)
         else:
             self.queue.put_nowait(req)
 
@@ -155,9 +155,10 @@ class Scanner:
                     subtitles_mtime_ns=subtitles_mtime,
                 )
 
-            # Probers skip unchanged files on their own
-            self.mediainfo.enqueue(path, force=req.force_refresh)
-            self.ardetector.enqueue(path, force=req.force_detect)
+            if changed or req.force_refresh or db.get_mediainfo(path) is None:
+                self.mediainfo.enqueue(path)
+            if changed or req.force_detect or db.get_ardetector(path) is None:
+                self.ardetector.enqueue(path)
 
             if subtitles_changed:
                 subtitles.update_external_subs(path, subtitle_paths)

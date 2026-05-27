@@ -1,11 +1,15 @@
-"""Per-pass probe workers. One queue + worker per probe type."""
+"""Per-pass probe workers. One queue + worker per probe type.
+
+Probers run on every path they're handed. Scanner decides whether a
+probe is warranted (file changed, force flag, no cached row) before
+queueing.
+"""
 
 import asyncio
 import json
 import logging
 from dataclasses import asdict
 from pathlib import Path
-from typing import NamedTuple
 
 import usharr.mediainfo as mediainfo_lib
 from usharr import db
@@ -14,58 +18,37 @@ from usharr.ardetector import detect
 logger = logging.getLogger(__name__)
 
 
-class ProbeRequest(NamedTuple):
-    path: Path
-    force: bool
-
-
 class Prober:
     """Long-lived per-pass worker. Subclass and implement ``probe()``."""
 
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[ProbeRequest] = asyncio.Queue()
+        self.queue: asyncio.Queue[Path] = asyncio.Queue()
 
-    def enqueue(self, path: Path, *, force: bool = False) -> None:
-        self.queue.put_nowait(ProbeRequest(path, force))
+    def enqueue(self, path: Path) -> None:
+        self.queue.put_nowait(path)
 
     async def process_queue_forever(self) -> None:
         """Drain the queue forever. Cancel-safe."""
         while True:
-            req = await self.queue.get()
+            path = await self.queue.get()
             try:
-                await self.probe(req.path, req.force)
+                if path.exists():
+                    await self.probe(path)
             except Exception as e:
-                logger.exception("%s: %s", req.path, str(e))
+                logger.exception("%s: %s", path, str(e))
             finally:
                 self.queue.task_done()
 
-    async def probe(self, path: Path, force: bool) -> None:
+    async def probe(self, path: Path) -> None:
         raise NotImplementedError
 
 
 class MediainfoProber(Prober):
-    """Cheap track-metadata pass. Retried on missing rows; on failure,
-    preserves cached track metadata so the UI keeps showing what we had.
-    """
+    """Extract Media Info"""
 
-    async def probe(self, path: Path, force: bool) -> None:
-        try:
-            st = path.stat()
-        except OSError as exc:
-            logger.warning("stat failed for %s: %s", path, exc)
-            return
-
-        mf = db.get(path)
-        if mf is None:
-            logger.warning("mediainfo: no media_file row for %s", path)
-            return
-
-        video_unchanged = mf.size_bytes == st.st_size and mf.mtime_ns == st.st_mtime_ns
-        cached = db.get_mediainfo(path)
-        if not force and video_unchanged and cached is not None:
-            return
-
+    async def probe(self, path: Path) -> None:
         logger.info("mediainfo: %s", path)
+        cached = db.get_mediainfo(path)
         try:
             mi = await mediainfo_lib.extract(path)
         except Exception as exc:
@@ -113,28 +96,9 @@ class MediainfoProber(Prober):
 
 
 class ArdetectorProber(Prober):
-    """Slow AR-sampling pass. Doesn't auto-retry persistent failures on
-    the same bytes — the user has `Redetect` for that. On failure,
-    records the error; cached aspect data isn't preserved (a re-run on
-    the same bytes would just fail again).
-    """
+    """Detect Aspect Ratios"""
 
-    async def probe(self, path: Path, force: bool) -> None:
-        try:
-            st = path.stat()
-        except OSError as exc:
-            logger.warning("stat failed for %s: %s", path, exc)
-            return
-
-        mf = db.get(path)
-        if mf is None:
-            logger.warning("ardetector: no media_file row for %s", path)
-            return
-
-        video_unchanged = mf.size_bytes == st.st_size and mf.mtime_ns == st.st_mtime_ns
-        if not force and video_unchanged and db.get_ardetector(path) is not None:
-            return
-
+    async def probe(self, path: Path) -> None:
         logger.info("ardetector: %s", path)
         try:
             result = await detect(path)
