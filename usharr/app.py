@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from usharr import db, plex, plex_sync
+from usharr import db, plex
 from usharr import format as fmt
 from usharr.config import get_config
 from usharr.scanner import ScanRequest, scanner
@@ -797,18 +797,12 @@ async def get_info(file_path: str) -> InfoResponse:
 
 
 @api.post("/webhook")
-async def webhook(form: Annotated[plex_sync.WebhookForm, Form()]) -> Response:
+async def webhook(form: Annotated[plex.PlexWebhookForm, Form()]) -> Response:
     """Handle Plex webhook"""
     payload = form.payload
 
-    if payload.event != "library.new":
-        return Response(status_code=204)
-
-    rating_key = payload.metadata.rating_key
-    path_map = get_config().plex.path_map
-
-    if local_path := await plex_sync.library_new(rating_key, path_map):
-        scanner.enqueue(ScanRequest(Path(local_path)))
+    if payload.event == "library.new":
+        scanner.enqueue(ScanRequest())
 
     return Response(status_code=204)
 

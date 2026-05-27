@@ -1,12 +1,6 @@
-"""Plex library polling + webhook handling.
-
-Polls `/library/sections` once per interval, walks each movie/show
-section, and upserts `plex_item` rows. Webhook endpoint (wired in
-``app.py``) re-fetches one item by ratingKey and upserts.
-"""
+"""Plex synchronization"""
 
 import logging
-from typing import Any
 
 import httpx
 from pydantic import (
@@ -14,7 +8,6 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
-    model_validator,
 )
 
 from usharr import db, plex
@@ -146,45 +139,3 @@ async def sync() -> None:
         logger.info("plex_sync: upserted=%d removed=%d", upserted, removed)
     except Exception:
         logger.exception("plex_sync errored")
-
-
-# --- webhook --------------------------------------------------------------
-
-
-class WebhookMetadata(Model):
-    rating_key: str = Field(alias="ratingKey")
-
-
-class WebhookPayload(Model):
-    event: str
-    metadata: WebhookMetadata = Field(alias="Metadata")
-
-    @model_validator(mode="before")
-    @classmethod
-    def parse_json_string(cls, value: Any) -> Any:
-        if isinstance(value, str):
-            return cls.model_validate_json(value)
-        return value
-
-
-class WebhookForm(Model):
-    payload: WebhookPayload
-
-
-async def library_new(rating_key: str, path_map: dict[str, str]) -> str | None:
-    """Handle a Plex `library.new` webhook. Return local path if found."""
-
-    logger.debug("library_new: %s", rating_key)
-
-    _, server_url, _ = plex.load_auth()
-
-    url = f"{server_url}/library/metadata/{rating_key}"
-    resp = await get_json(LibResponse, url)
-    if not resp.container.metadata:
-        return None
-
-    item = resp.container.metadata[0]
-    if remote_path := pick_file(item):
-        upsert(item, path_map)
-        return db.map_remote_path(remote_path, path_map)
-    return None

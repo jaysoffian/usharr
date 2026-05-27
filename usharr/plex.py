@@ -12,9 +12,17 @@ import asyncio
 import logging
 import time
 import uuid
+from typing import Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from usharr import db
 
@@ -97,6 +105,21 @@ class MediaContainer(PlexModel):
 
 class PlexMetadataResponse(PlexModel):
     container: MediaContainer = Field(alias="MediaContainer")
+
+
+class PlexWebhookPayload(PlexModel):
+    event: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_json_string(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return cls.model_validate_json(value)
+        return value
+
+
+class PlexWebhookForm(PlexModel):
+    payload: PlexWebhookPayload
 
 
 RESOURCES_ADAPTER: TypeAdapter[list[PlexResource]] = TypeAdapter(list[PlexResource])

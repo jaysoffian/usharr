@@ -19,8 +19,12 @@ class Prober:
 
     def __init__(self) -> None:
         self.queue: asyncio.Queue[Path] = asyncio.Queue()
+        self.pending: set[Path] = set()
 
     def enqueue(self, path: Path) -> None:
+        if path in self.pending:
+            return
+        self.pending.add(path)
         self.queue.put_nowait(path)
 
     async def process_queue_forever(self) -> None:
@@ -33,6 +37,7 @@ class Prober:
             except Exception as e:
                 logger.exception("%s: %s", path, str(e))
             finally:
+                self.pending.discard(path)
                 self.queue.task_done()
 
     async def probe(self, path: Path) -> None:

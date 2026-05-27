@@ -54,8 +54,10 @@ class Scanner:
             self.queue.put_nowait(req)
             return
         if req.force_refresh:
+            db.delete_mediainfo(req.path)
             self.mediainfo.enqueue(req.path)
         if req.force_detect:
+            db.delete_ardetector(req.path)
             self.ardetector.enqueue(req.path)
 
     def start(self) -> None:
@@ -81,12 +83,6 @@ class Scanner:
         while True:
             self.enqueue(ScanRequest())
             await self.queue.join()
-            await asyncio.gather(
-                plex_sync.sync(),
-                bazarr_sync.sync(),
-                radarr_sync.sync(),
-                sonarr_sync.sync(),
-            )
             await asyncio.sleep(INTERVAL_SECONDS)
 
     async def process_queue_forever(self) -> None:
@@ -104,8 +100,9 @@ class Scanner:
                 self.queue.task_done()
             try:
                 await self.scan(req)
+                await self.sync()
             except Exception as exc:
-                logger.exception("Exception while scanning: %s", str(exc))
+                logger.exception("Exception while processing queue: %s", str(exc))
             finally:
                 self.queue.task_done()
 
@@ -155,15 +152,31 @@ class Scanner:
                     subtitles_mtime_ns=subtitles_mtime,
                 )
 
-            if changed or req.force_refresh or db.get_mediainfo(path) is None:
+            if changed or req.force_refresh:
+                db.delete_mediainfo(path)
+            if changed or req.force_detect:
+                db.delete_ardetector(path)
+
+            if db.get_mediainfo(path) is None:
                 self.mediainfo.enqueue(path)
-            if changed or req.force_detect or db.get_ardetector(path) is None:
+            if db.get_ardetector(path) is None:
                 self.ardetector.enqueue(path)
 
             if subtitles_changed:
                 subtitles.update_external_subs(path, subtitle_paths)
 
         logger.info("scan completed in %.1fs", time.monotonic() - start)
+
+    async def sync(self) -> None:
+        logger.info("sync started")
+        start = time.monotonic()
+        await asyncio.gather(
+            plex_sync.sync(),
+            bazarr_sync.sync(),
+            radarr_sync.sync(),
+            sonarr_sync.sync(),
+        )
+        logger.info("sync completed in %.1fs", time.monotonic() - start)
 
 
 scanner = Scanner()

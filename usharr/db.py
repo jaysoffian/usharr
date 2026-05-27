@@ -621,6 +621,10 @@ def upsert_mediainfo(
         raise
 
 
+def delete_mediainfo(path: Path) -> None:
+    get_conn().execute("DELETE FROM mediainfo WHERE path = ?", (str(path),))
+
+
 def set_mediainfo_error(path: Path, error: str) -> None:
     """Record an error on the mediainfo row, preserving any cached track
     metadata. Inserts a near-blank row if none exists.
@@ -664,6 +668,10 @@ def get_ardetector(path: Path | str) -> ArdetectorRow | None:
     if row is None:
         return None
     return make_row(ArdetectorRow, ARDETECTOR_COLS, row)
+
+
+def delete_ardetector(path: Path) -> None:
+    get_conn().execute("DELETE FROM ardetector WHERE path = ?", (str(path),))
 
 
 def upsert_ardetector(row: ArdetectorRow) -> None:
