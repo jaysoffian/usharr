@@ -52,6 +52,23 @@ class LibMetadata(Model):
     index: int | None = None
     media: list[LibMedia] = Field(default_factory=list, alias="Media")
 
+    def upsert(self, path_map: dict[str, str]) -> None:
+        remote_path = next(
+            (p.file for m in self.media for p in m.parts if p.file),
+            None,
+        )
+        db.upsert_plex_item(
+            rating_key=self.rating_key,
+            item_type=self.type or "movie",
+            title=self.title or None,
+            year=self.year,
+            show_title=self.grandparent_title,
+            season_number=self.parent_index,
+            episode_number=self.index,
+            remote_path=remote_path,
+            path_map=path_map,
+        )
+
 
 class LibContainer(Model):
     metadata: list[LibMetadata] = Field(default_factory=list, alias="Metadata")
@@ -76,29 +93,9 @@ async def get_json[T: Model](model: type[T], url: str) -> T:
         raise plex.PlexError(msg) from exc
 
 
-def pick_file(item: LibMetadata) -> str | None:
-    return next((p.file for m in item.media for p in m.parts if p.file), None)
-
-
-def upsert(item: LibMetadata, path_map: dict[str, str]) -> str | None:
-    logger.debug("upsert %r", item)
-    return db.upsert_plex_item(
-        rating_key=item.rating_key,
-        item_type=item.type or "movie",
-        title=item.title or None,
-        year=item.year,
-        show_title=item.grandparent_title,
-        season_number=item.parent_index,
-        episode_number=item.index,
-        remote_path=pick_file(item),
-        path_map=path_map,
-    )
-
-
 async def sync() -> None:
     """Walk sections and upsert every movie + episode into plex_item."""
     try:
-        path_map = get_config().plex.path_map
         try:
             _, server_url, _ = plex.load_auth()
         except plex.PlexNotLinkedError:
@@ -113,6 +110,8 @@ async def sync() -> None:
 
         seen: set[str] = set()
         upserted = 0
+
+        path_map = get_config().plex.path_map
 
         for section in sections_resp.container.directories:
             if section.type == "movie":
@@ -130,7 +129,7 @@ async def sync() -> None:
                 if not item.rating_key:
                     continue
                 seen.add(item.rating_key)
-                upsert(item, path_map)
+                item.upsert(path_map)
                 upserted += 1
 
         existing = db.list_plex_rating_keys()
