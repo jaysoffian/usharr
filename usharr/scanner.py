@@ -104,8 +104,8 @@ class Scanner:
                 self.queue.task_done()
             try:
                 await self.scan(req)
-            except Exception:
-                logger.exception("scan walk errored")
+            except Exception as exc:
+                logger.exception("Exception while scanning: %s", str(exc))
             finally:
                 self.queue.task_done()
 
@@ -126,9 +126,7 @@ class Scanner:
 
     async def scan(self, /, req: ScanRequest) -> None:
         """Scan for new/updated media files and/or refresh/analyze existing files."""
-        logger.info(
-            "scan walk starting refresh=%s analyze=%s", req.refresh, req.analyze
-        )
+        logger.info("scan started refresh=%s analyze=%s", req.refresh, req.analyze)
         start = time.monotonic()
 
         videos = self.find_video_files()
@@ -165,7 +163,7 @@ class Scanner:
             if subtitles_changed:
                 subtitles.update_external_subs(path, subtitle_paths)
 
-        logger.info("scan walk complete: elapsed=%.1fs", time.monotonic() - start)
+        logger.info("scan completed in %.1fs", time.monotonic() - start)
 
 
 scanner = Scanner()
