@@ -7,8 +7,8 @@ View-layer code that needs to add template fields should
 ``dataclasses.asdict(row)`` first and work in dict-space from there.
 
 Schema overview:
-  * ``media_file`` is the discovery row — path/size/mtime/subtitles +
-    ``discovered_at``. A row exists iff we've seen the file on disk.
+  * ``media_file`` is the discovery row — path/size/mtime/subtitles.
+    A row exists iff we've seen the file on disk.
   * ``mediainfo`` holds the cheap track-metadata pass (container,
     video_*, duration). Row presence ⇒ at least one attempt; ``error``
     column distinguishes success from a recorded failure.
@@ -40,8 +40,7 @@ CREATE TABLE IF NOT EXISTS media_file (
     path              TEXT PRIMARY KEY,
     size_bytes        INTEGER NOT NULL,
     mtime_ns          INTEGER NOT NULL,
-    subtitles_mtime_ns INTEGER,
-    discovered_at     INTEGER NOT NULL
+    subtitles_mtime_ns INTEGER
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS mediainfo (
@@ -174,7 +173,6 @@ class MediaFileRow:
     size_bytes: int
     mtime_ns: int
     subtitles_mtime_ns: int | None
-    discovered_at: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,7 +256,6 @@ class LibraryRow:
     size_bytes: int
     mtime_ns: int
     subtitles_mtime_ns: int | None
-    discovered_at: int
     # mediainfo fields (NULL when no mediainfo row yet — i.e. stub).
     mediainfo_probed_at: int | None
     mediainfo_error: str | None
@@ -333,8 +330,19 @@ def init_db() -> None:
     db.executescript(CREATE_TABLES)
     db.executescript(CREATE_INDEXES)
     maybe_rename_subtitles_column()
+    maybe_drop_discovered_at()
     maybe_reprobe_on_schema_bump()
     logger.info("Opened DB at %s", DB_PATH)
+
+
+def maybe_drop_discovered_at() -> None:
+    """One-shot drop of media_file.discovered_at. No-op on fresh DBs."""
+    conn = get_conn()
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(media_file)").fetchall()}
+    if "discovered_at" not in cols:
+        return
+    conn.execute("ALTER TABLE media_file DROP COLUMN discovered_at")
+    logger.info("Dropped media_file.discovered_at")
 
 
 def maybe_rename_subtitles_column() -> None:
@@ -456,7 +464,6 @@ MEDIA_COLS = (
     "size_bytes",
     "mtime_ns",
     "subtitles_mtime_ns",
-    "discovered_at",
 )
 
 
@@ -483,21 +490,17 @@ def upsert_media_file(
     size_bytes: int,
     mtime_ns: int,
     subtitles_mtime_ns: int | None,
-    discovered_at: int,
 ) -> None:
-    """Insert a media_file row, or refresh stat fields if it already exists.
-
-    `discovered_at` is set on first insert and preserved on update.
-    """
+    """Insert a media_file row, or refresh stat fields if it already exists."""
     get_conn().execute(
         "INSERT INTO media_file"
-        " (path, size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at)"
-        " VALUES (?, ?, ?, ?, ?)"
+        " (path, size_bytes, mtime_ns, subtitles_mtime_ns)"
+        " VALUES (?, ?, ?, ?)"
         " ON CONFLICT(path) DO UPDATE SET"
         " size_bytes = excluded.size_bytes,"
         " mtime_ns = excluded.mtime_ns,"
         " subtitles_mtime_ns = excluded.subtitles_mtime_ns",
-        (str(path), size_bytes, mtime_ns, subtitles_mtime_ns, discovered_at),
+        (str(path), size_bytes, mtime_ns, subtitles_mtime_ns),
     )
 
 

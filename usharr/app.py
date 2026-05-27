@@ -405,7 +405,6 @@ class AspectInfo(BaseModel):
 
 class InfoResponse(BaseModel):
     path: str
-    discovered_at: dt.datetime
     mediainfo_probed_at: dt.datetime | None = None
     ardetector_probed_at: dt.datetime | None = None
     mediainfo_error: str | None = None
@@ -431,7 +430,6 @@ def build_info(mf: db.MediaFileRow) -> InfoResponse:
     samples = [AspectSample(**s) for s in samples_raw] if samples_raw else None
     return InfoResponse(
         path=path,
-        discovered_at=dt.datetime.fromtimestamp(mf.discovered_at, dt.UTC),
         mediainfo_probed_at=(
             dt.datetime.fromtimestamp(mi.probed_at, dt.UTC) if mi else None
         ),

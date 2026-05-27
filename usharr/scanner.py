@@ -138,7 +138,6 @@ class Scanner:
         if removed:
             logger.info("Removed %d stale row(s) from DB", removed)
 
-        now = int(time.time())
         stubs = 0
         subtitle_only = 0
 
@@ -168,7 +167,6 @@ class Scanner:
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
                     subtitles_mtime_ns=subtitles_mtime,
-                    discovered_at=now,
                 )
 
             # Probers do their own change detection and skip unchanged
