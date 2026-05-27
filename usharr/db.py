@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS ardetector (
     error          TEXT,
     aspect_primary REAL,
     aspect_widest  REAL,
-    aspect_samples TEXT  -- JSON list of {aspect, percentage} samples
+    aspect_samples TEXT,  -- JSON list of {aspect, percentage} samples
+    color_pct      REAL   -- 0.0=monochrome, 1.0=color; NULL=unknown
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS audio_track (
@@ -193,6 +194,7 @@ class ArdetectorRow:
     aspect_primary: float | None = None
     aspect_widest: float | None = None
     aspect_samples: str | None = None
+    color_pct: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +267,7 @@ class LibraryRow:
     aspect_primary: float | None
     aspect_widest: float | None
     aspect_samples: str | None
+    color_pct: float | None
     # plex_item fields aliased with a plex_ prefix; nullable via LEFT JOIN.
     plex_rating_key: str | None
     plex_type: str | None
@@ -319,6 +322,7 @@ def init_db() -> None:
     maybe_rename_subtitles_column()
     maybe_drop_discovered_at()
     maybe_drop_timestamp_columns()
+    maybe_add_ardetector_color_pct()
     maybe_reprobe_on_schema_bump()
     logger.info("Opened DB at %s", DB_PATH)
 
@@ -350,6 +354,20 @@ def maybe_drop_timestamp_columns() -> None:
         if col in present:
             conn.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
             logger.info("Dropped %s.%s", table, col)
+
+
+def maybe_add_ardetector_color_pct() -> None:
+    """One-shot add of ardetector.color_pct. Existing rows get NULL; users
+    re-trigger detection per file via the Analyze action to populate it.
+    No-op on fresh DBs (CREATE TABLE already declares the column) and on
+    DBs that have already been migrated.
+    """
+    conn = get_conn()
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(ardetector)").fetchall()}
+    if "color_pct" in cols:
+        return
+    conn.execute("ALTER TABLE ardetector ADD COLUMN color_pct REAL")
+    logger.info("Added ardetector.color_pct")
 
 
 def maybe_rename_subtitles_column() -> None:
@@ -655,6 +673,7 @@ ARDETECTOR_COLS = (
     "aspect_primary",
     "aspect_widest",
     "aspect_samples",
+    "color_pct",
 )
 
 

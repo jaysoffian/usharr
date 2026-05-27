@@ -631,6 +631,26 @@ def format_ratio(r: float) -> str:
     return f"{r:.2f}"
 
 
+def format_color(color_pct: float | None) -> str:
+    """Render ardetector color_pct as a Video-table value, paired with
+    the "Color" row label. The parenthetical pct always refers to the
+    dominant class. 5/95 buffer at the extremes absorbs detector noise.
+      * color_pct <= 5%  → "Monochrome"
+      * color_pct < 50%  → "Monochrome (Y%) w/color scenes"   (Y = mono pct)
+      * color_pct < 95%  → "Color (X%) w/monochrome scenes"   (X = color pct)
+      * color_pct >= 95% → "Color"
+    """
+    if color_pct is None:
+        return "—"
+    if color_pct <= 0.05:
+        return "Monochrome"
+    if color_pct >= 0.95:
+        return "Color"
+    if color_pct >= 0.5:
+        return f"Color ({int(color_pct * 100)}%) w/monochrome scenes"
+    return f"Monochrome ({int((1 - color_pct) * 100)}%) w/color scenes"
+
+
 def format_duration(seconds: float | None) -> str:
     if seconds is None or seconds <= 0:
         return ""

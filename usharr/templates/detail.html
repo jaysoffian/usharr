@@ -13,6 +13,7 @@
   <tr><th>Resolution</th><td>{{ (mf.video_width or '?')|string + '×' + (mf.video_height or '?')|string }}{% if bucket %} <span class="subtle">({{ bucket }})</span>{% endif %}</td></tr>
   <tr><th>Bit depth</th><td>{{ (mf.video_bit_depth|string + ' bit') if mf.video_bit_depth else '—' }}</td></tr>
   <tr><th>HDR</th><td>{{ mf.video_hdr or '—' }}{% if mf.video_hdr_format %}<div class="subtle">{{ mf.video_hdr_format }}</div>{% endif %}</td></tr>
+  <tr><th>Color</th><td>{{ mf.color }}</td></tr>
   <tr><th>Frame rate</th><td>{{ mf.video_frame_rate or '—' }}</td></tr>
   <tr><th>Bit rate</th><td>{{ ('%.1f Mbps' % (mf.video_bit_rate / 1000000)) if mf.video_bit_rate else '—' }}{% if mf.video_max_bit_rate %} <span class="subtle">({{ '%.1f' % (mf.video_max_bit_rate / 1000000) }} max)</span>{% endif %}</td></tr>
   <tr><th>Container</th><td>{{ mf.container or '—' }}</td></tr>

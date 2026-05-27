@@ -755,6 +755,7 @@ def detail_view(
         "video_bit_rate": mi.video_bit_rate if mi else None,
         "video_max_bit_rate": mi.video_max_bit_rate if mi else None,
         "aspect_primary": ar.aspect_primary if ar else None,
+        "color": fmt.format_color(ar.color_pct if ar else None),
         "error": "; ".join(errors) if errors else None,
     }
 

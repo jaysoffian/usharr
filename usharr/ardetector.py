@@ -70,8 +70,29 @@ SEGMENT_AR_TOLERANCE = AR_SECONDARY_DELTA / 2
 # a real AR (vs. isolated cropdetect noise on scene transitions).
 MIN_SEGMENT_SAMPLES = 2
 
+# A frame is monochrome iff its peak chroma is low AND the chroma is
+# distributed uniformly across the frame.
+#
+# * SATMAX < threshold rules out anything with at least one saturated patch
+#   (e.g. the red coat in an otherwise B&W frame).
+# * (SATMAX - SATAVG) < spread guards against heavily desaturated *color*
+#   footage (dim sepia-graded night scenes etc.), where peak chroma sits
+#   in the 15-25 range but most pixels are near-neutral so the average is
+#   far below the peak. Uniform monochrome — true B&W or actual sepia —
+#   has every pixel sharing the same chroma offset, so peak ≈ average.
+MONOCHROME_SATMAX_THRESHOLD = 25.0
+MONOCHROME_SPREAD_MAX = 10.0
+
+# Frames dimmer than this carry no usable chroma signal — SATMAX and SATAVG
+# both sit near zero regardless of the underlying content. Excluded from the
+# color/mono tally so scene-cut black frames don't get charged as monochrome.
+CHROMA_YAVG_MIN = 20.0
+
 # parsing regexes
 P_YLOW = re.compile(r"lavfi\.signalstats\.YLOW=([0-9]*)")
+P_YAVG = re.compile(r"lavfi\.signalstats\.YAVG=([0-9.]+)")
+P_SATAVG = re.compile(r"lavfi\.signalstats\.SATAVG=([0-9.]+)")
+P_SATMAX = re.compile(r"lavfi\.signalstats\.SATMAX=([0-9.]+)")
 P_SAMPLE = re.compile(
     r"x1:([0-9]*)\sx2:([0-9]*)\sy1:([0-9]*)\sy2:([0-9]*)\sw:([0-9]*)\sh:([0-9]*)\sx:"
 )
@@ -105,6 +126,11 @@ class DetectionResult:
     sar: float
     samples_probed: int
     samples_valid: int
+    # Fraction of samples that looked like color (SATMAX ≥ threshold). 1.0
+    # = all color; 0.0 = pure monochrome; mid-range = mixed (e.g. a B&W
+    # episode with a colored studio bumper). None when no sample produced
+    # a usable SATMAX reading.
+    color_pct: float | None = None
     segment_count: int = 0
     # Raw histograms kept for debug visibility only; detection uses the
     # chronological timeline and temporal-adjacency segmentation.
@@ -134,6 +160,12 @@ class VideoInfo:
 
     sample_count: int = 0
     ar_sample: float = 0.0
+
+    # Color-vs-monochrome tallies. `color_samples` counts samples classified
+    # as color; `chroma_samples` counts samples that produced a usable
+    # chroma reading at all (the denominator).
+    color_samples: int = 0
+    chroma_samples: int = 0
 
     # (timestamp_sec, ar_calculated) for every sample that passed plausibility,
     # in chronological order. Temporal-adjacency clustering uses this directly.
@@ -315,6 +347,8 @@ async def scan_sample(
     # `-vframes 1` + `skip=0` to evaluate exactly one frame (the keyframe
     # ffmpeg lands on with -noaccurate_seek). Content-identical to TMM's
     # first-match reading at a fraction of the decode cost.
+    # signalstats+metadata=print piggybacks on the same decoded frame to
+    # emit SATMAX for the color/monochrome classifier.
     return await run_ffmpeg(
         [
             "ffmpeg",
@@ -328,7 +362,10 @@ async def scan_sample(
             "-i",
             str(path),
             "-vf",
-            f"cropdetect=limit={int(dark_level)}:round=2:skip=0",
+            (
+                f"cropdetect=limit={int(dark_level)}:round=2:skip=0,"
+                "signalstats,metadata=print"
+            ),
             "-vframes",
             "1",
             "-f",
@@ -384,6 +421,34 @@ def parse_dark_level(buf: str, vi: VideoInfo) -> None:
     vi.dark_level = 9999
 
 
+def classify_is_color(
+    satmax: float | None,
+    satavg: float | None,
+    yavg: float | None,
+) -> bool | None:
+    """Color iff peak chroma is high OR chroma is non-uniform across the
+    frame. Returns None when no SATMAX reading is available, or when the
+    frame is too dark to carry reliable chroma.
+    """
+    if satmax is None:
+        return None
+    if yavg is not None and yavg < CHROMA_YAVG_MIN:
+        return None
+    if satmax >= MONOCHROME_SATMAX_THRESHOLD:
+        return True
+    if satavg is None:
+        return False
+    return (satmax - satavg) >= MONOCHROME_SPREAD_MAX
+
+
+def count_chroma(vi: VideoInfo, is_color: bool | None) -> None:
+    if is_color is None:
+        return
+    vi.chroma_samples += 1
+    if is_color:
+        vi.color_samples += 1
+
+
 def record_sample(
     x1: int,
     x2: int,
@@ -394,11 +459,16 @@ def record_sample(
     t_sec: int,
     vi: VideoInfo,
     pass_label: str,
+    is_color: bool | None = None,
 ) -> bool:
     """Run plausibility checks; on pass, append to vi.timeline.
 
     Shared by per-sample input-seek scans and the full-decode fallback.
+    Chroma classification is accumulated independently of the AR
+    plausibility result so we still get a color classification on frames
+    whose crop reading was rejected.
     """
+    count_chroma(vi, is_color)
     black_left = x1
     black_right = abs(vi.width - x2 - 1)
     black_top = y1
@@ -455,6 +525,16 @@ def record_sample(
     return True
 
 
+def parse_float(pattern: re.Pattern[str], buf: str) -> float | None:
+    m = pattern.search(buf)
+    if m is None:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
 def parse_sample(
     buf: str,
     t_sec: int,
@@ -463,8 +543,24 @@ def parse_sample(
 ) -> None:
     # use the FIRST match — the first decoded frame in the window.
     m = P_SAMPLE.search(buf)
+    satmax = parse_float(P_SATMAX, buf)
+    satavg = parse_float(P_SATAVG, buf)
+    yavg = parse_float(P_YAVG, buf)
+    is_color = classify_is_color(satmax, satavg, yavg)
+    logger.debug(
+        "%s: t=%ds chroma: SATMAX=%s SATAVG=%s YAVG=%s is_color=%s",
+        pass_label,
+        t_sec,
+        satmax,
+        satavg,
+        yavg,
+        is_color,
+    )
     if m is None:
         logger.debug("%s: sample: no cropdetect match in output", pass_label)
+        # Still count the chroma reading even when cropdetect rejected the
+        # frame — color classification is independent of plausibility.
+        count_chroma(vi, is_color)
         return
     record_sample(
         x1=int(m.group(1)),
@@ -476,6 +572,7 @@ def parse_sample(
         t_sec=t_sec,
         vi=vi,
         pass_label=pass_label,
+        is_color=is_color,
     )
 
 
@@ -655,7 +752,8 @@ async def full_decode_pass(path: Path, vi: VideoInfo) -> int:
             # framestep before cropdetect: cropdetect logs metadata for every
             # frame it sees, so thin the input first.
             f"framestep={framestep},"
-            f"cropdetect=limit={int(vi.dark_level)}:round=2:skip=0"
+            f"cropdetect=limit={int(vi.dark_level)}:round=2:skip=0,"
+            "signalstats,metadata=print"
         ),
         "-f",
         "null",
@@ -666,22 +764,80 @@ async def full_decode_pass(path: Path, vi: VideoInfo) -> int:
     buf = await run_ffmpeg(argv, pass_label=pass_label, timeout=timeout)
 
     parsed = 0
-    for m in P_FULL_SAMPLE.finditer(buf):
+    pending: re.Match[str] | None = None
+    pending_satmax: float | None = None
+    pending_satavg: float | None = None
+    pending_yavg: float | None = None
+
+    def emit() -> None:
+        nonlocal parsed, pending, pending_satmax, pending_satavg, pending_yavg
+        if pending is None:
+            return
+        crop_match = pending
+        is_color = classify_is_color(pending_satmax, pending_satavg, pending_yavg)
+        t_raw = float(crop_match.group(7))
+        logger.debug(
+            "%s: t=%.1fs chroma: SATMAX=%s SATAVG=%s YAVG=%s is_color=%s",
+            pass_label,
+            t_raw,
+            pending_satmax,
+            pending_satavg,
+            pending_yavg,
+            is_color,
+        )
+        pending = None
+        pending_satmax = None
+        pending_satavg = None
+        pending_yavg = None
         parsed += 1
-        t_raw = float(m.group(7))
         if t_raw < 0:
-            continue
+            return
         record_sample(
-            x1=int(m.group(1)),
-            x2=int(m.group(2)),
-            y1=int(m.group(3)),
-            y2=int(m.group(4)),
-            width=int(m.group(5)),
-            height=int(m.group(6)),
+            x1=int(crop_match.group(1)),
+            x2=int(crop_match.group(2)),
+            y1=int(crop_match.group(3)),
+            y2=int(crop_match.group(4)),
+            width=int(crop_match.group(5)),
+            height=int(crop_match.group(6)),
             t_sec=int(t_raw),
             vi=vi,
             pass_label=pass_label,
+            is_color=is_color,
         )
+
+    # Walk lines so we can pair each cropdetect frame with the signalstats
+    # metadata block that follows it for the same frame. The signalstats
+    # keys can arrive in any order within the block.
+    for line in buf.splitlines():
+        crop = P_FULL_SAMPLE.search(line)
+        if crop is not None:
+            # Flush the previous frame (with whatever chroma readings arrived).
+            emit()
+            pending = crop
+            continue
+        if pending is None:
+            continue
+        sm = P_SATMAX.search(line)
+        if sm is not None:
+            try:
+                pending_satmax = float(sm.group(1))
+            except ValueError:
+                pending_satmax = None
+            continue
+        sa = P_SATAVG.search(line)
+        if sa is not None:
+            try:
+                pending_satavg = float(sa.group(1))
+            except ValueError:
+                pending_satavg = None
+            continue
+        ya = P_YAVG.search(line)
+        if ya is not None:
+            try:
+                pending_yavg = float(ya.group(1))
+            except ValueError:
+                pending_yavg = None
+    emit()
     logger.info(
         "%s: full-decode parsed=%d valid=%d",
         pass_label,
@@ -877,6 +1033,16 @@ async def detect(path: Path) -> DetectionResult:
     w_hist = sorted(vi.width_map.items(), key=lambda kv: (-kv[1], kv[0]))
     h_hist = sorted(vi.height_map.items(), key=lambda kv: (-kv[1], kv[0]))
 
+    color_pct = vi.color_samples / vi.chroma_samples if vi.chroma_samples > 0 else None
+    if color_pct is not None:
+        logger.info(
+            "detect %s: color=%.0f%% mono=%.0f%% (samples=%d)",
+            path,
+            color_pct * 100,
+            (1 - color_pct) * 100,
+            vi.chroma_samples,
+        )
+
     return DetectionResult(
         primary_aspect=primary_aspect,
         widest_aspect=widest_aspect,
@@ -885,6 +1051,7 @@ async def detect(path: Path) -> DetectionResult:
         sar=vi.ar_sample,
         samples_probed=sample_counter,
         samples_valid=vi.sample_count,
+        color_pct=color_pct,
         segment_count=len(segments),
         ar_histogram=ar_hist,
         width_histogram=w_hist,
@@ -898,4 +1065,5 @@ def to_ardetector_row(path: Path, result: DetectionResult) -> ArdetectorRow:
         aspect_primary=result.primary_aspect,
         aspect_widest=result.widest_aspect,
         aspect_samples=json.dumps([asdict(d) for d in result.detected]),
+        color_pct=result.color_pct,
     )
