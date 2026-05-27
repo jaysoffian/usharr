@@ -12,7 +12,6 @@ matching so deep-link lookup at render time is one indexed query.
 """
 
 import logging
-import time
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -77,8 +76,6 @@ async def sync() -> None:
             bz.api_key,
         )
 
-        now = int(time.time())
-
         seen_movies: set[int] = set()
         for m in movies_resp.data:
             seen_movies.add(m.radarr_id)
@@ -86,7 +83,6 @@ async def sync() -> None:
                 radarr_id=m.radarr_id,
                 remote_path=m.path or None,
                 path_map=bz.path_map,
-                updated_at=now,
             )
 
         seen_series: set[int] = set()
@@ -96,7 +92,6 @@ async def sync() -> None:
                 sonarr_id=s.sonarr_series_id,
                 remote_path=s.path or None,
                 path_map=bz.path_map,
-                updated_at=now,
             )
 
         stale_movies = sorted(db.list_bazarr_movie_ids() - seen_movies)

@@ -1,7 +1,6 @@
 """FastAPI app: endpoints + background scan loop."""
 
 import dataclasses
-import datetime as dt
 import json
 import logging
 import os
@@ -405,8 +404,6 @@ class AspectInfo(BaseModel):
 
 class InfoResponse(BaseModel):
     path: str
-    mediainfo_probed_at: dt.datetime | None = None
-    ardetector_probed_at: dt.datetime | None = None
     mediainfo_error: str | None = None
     ardetector_error: str | None = None
     container: str | None = None
@@ -430,12 +427,6 @@ def build_info(mf: db.MediaFileRow) -> InfoResponse:
     samples = [AspectSample(**s) for s in samples_raw] if samples_raw else None
     return InfoResponse(
         path=path,
-        mediainfo_probed_at=(
-            dt.datetime.fromtimestamp(mi.probed_at, dt.UTC) if mi else None
-        ),
-        ardetector_probed_at=(
-            dt.datetime.fromtimestamp(ar.probed_at, dt.UTC) if ar else None
-        ),
         mediainfo_error=mi.error if mi else None,
         ardetector_error=ar.error if ar else None,
         container=mi.container if mi else None,

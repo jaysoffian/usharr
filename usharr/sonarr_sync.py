@@ -5,7 +5,6 @@ Deep-link route:
 """
 
 import logging
-import time
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
@@ -51,7 +50,6 @@ async def sync() -> None:
             return
 
         series = await get_series(s.url, s.api_key)
-        now = int(time.time())
 
         seen: set[int] = set()
         for row in series:
@@ -61,7 +59,6 @@ async def sync() -> None:
                 title_slug=row.title_slug or None,
                 remote_path=row.path or None,
                 path_map=s.path_map,
-                updated_at=now,
             )
 
         stale = sorted(db.list_sonarr_series_ids() - seen)

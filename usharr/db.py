@@ -45,7 +45,6 @@ CREATE TABLE IF NOT EXISTS media_file (
 
 CREATE TABLE IF NOT EXISTS mediainfo (
     path               TEXT PRIMARY KEY REFERENCES media_file(path) ON DELETE CASCADE,
-    probed_at          INTEGER NOT NULL,
     error              TEXT,
     container          TEXT,
     duration           REAL,
@@ -63,7 +62,6 @@ CREATE TABLE IF NOT EXISTS mediainfo (
 
 CREATE TABLE IF NOT EXISTS ardetector (
     path           TEXT PRIMARY KEY REFERENCES media_file(path) ON DELETE CASCADE,
-    probed_at      INTEGER NOT NULL,
     error          TEXT,
     aspect_primary REAL,
     aspect_widest  REAL,
@@ -117,34 +115,29 @@ CREATE TABLE IF NOT EXISTS plex_item (
     show_title     TEXT,
     season_number  INTEGER,
     episode_number INTEGER,
-    local_path     TEXT,
-    updated_at     INTEGER NOT NULL
+    local_path     TEXT
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS bazarr_movie (
     radarr_id    INTEGER PRIMARY KEY,
-    local_path   TEXT,             -- remote movie file path mapped via path_map
-    updated_at   INTEGER NOT NULL
+    local_path   TEXT              -- remote movie file path mapped via path_map
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS bazarr_series (
     sonarr_id    INTEGER PRIMARY KEY,
-    local_folder TEXT,             -- remote show folder mapped via path_map
-    updated_at   INTEGER NOT NULL
+    local_folder TEXT              -- remote show folder mapped via path_map
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS radarr_movie (
     movie_id   INTEGER PRIMARY KEY,  -- Radarr's internal id
     tmdb_id    INTEGER,               -- for /movie/{tmdbId} deep-links
-    local_path TEXT,                  -- remote movie file path mapped via path_map
-    updated_at INTEGER NOT NULL
+    local_path TEXT                   -- remote movie file path mapped via path_map
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS sonarr_series (
     series_id    INTEGER PRIMARY KEY, -- Sonarr's internal id
     title_slug   TEXT,                -- for /series/{slug} deep-links
-    local_folder TEXT,                -- remote series folder mapped via path_map
-    updated_at   INTEGER NOT NULL
+    local_folder TEXT                 -- remote series folder mapped via path_map
 ) WITHOUT ROWID;
 """
 
@@ -178,7 +171,6 @@ class MediaFileRow:
 @dataclass(frozen=True, slots=True)
 class MediainfoRow:
     path: str
-    probed_at: int
     error: str | None
     container: str | None
     duration: float | None
@@ -197,7 +189,6 @@ class MediainfoRow:
 @dataclass(frozen=True, slots=True)
 class ArdetectorRow:
     path: str
-    probed_at: int
     error: str | None
     aspect_primary: float | None
     aspect_widest: float | None
@@ -246,7 +237,6 @@ class PlexItemRow:
     season_number: int | None
     episode_number: int | None
     local_path: str | None
-    updated_at: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,7 +247,6 @@ class LibraryRow:
     mtime_ns: int
     subtitles_mtime_ns: int | None
     # mediainfo fields (NULL when no mediainfo row yet — i.e. stub).
-    mediainfo_probed_at: int | None
     mediainfo_error: str | None
     container: str | None
     duration: float | None
@@ -272,7 +261,6 @@ class LibraryRow:
     video_bit_rate: int | None
     video_max_bit_rate: int | None
     # ardetector fields (NULL when no ardetector row yet).
-    ardetector_probed_at: int | None
     ardetector_error: str | None
     aspect_primary: float | None
     aspect_widest: float | None
@@ -285,7 +273,6 @@ class LibraryRow:
     plex_show_title: str | None
     plex_season_number: int | None
     plex_episode_number: int | None
-    plex_updated_at: int | None
 
 
 def make_row[T](
@@ -331,6 +318,7 @@ def init_db() -> None:
     db.executescript(CREATE_INDEXES)
     maybe_rename_subtitles_column()
     maybe_drop_discovered_at()
+    maybe_drop_timestamp_columns()
     maybe_reprobe_on_schema_bump()
     logger.info("Opened DB at %s", DB_PATH)
 
@@ -343,6 +331,25 @@ def maybe_drop_discovered_at() -> None:
         return
     conn.execute("ALTER TABLE media_file DROP COLUMN discovered_at")
     logger.info("Dropped media_file.discovered_at")
+
+
+def maybe_drop_timestamp_columns() -> None:
+    """One-shot drop of unused probed_at / updated_at columns."""
+    conn = get_conn()
+    drops = (
+        ("mediainfo", "probed_at"),
+        ("ardetector", "probed_at"),
+        ("plex_item", "updated_at"),
+        ("bazarr_movie", "updated_at"),
+        ("bazarr_series", "updated_at"),
+        ("radarr_movie", "updated_at"),
+        ("sonarr_series", "updated_at"),
+    )
+    for table, col in drops:
+        present = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if col in present:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+            logger.info("Dropped %s.%s", table, col)
 
 
 def maybe_rename_subtitles_column() -> None:
@@ -508,7 +515,6 @@ def upsert_media_file(
 
 MEDIAINFO_COLS = (
     "path",
-    "probed_at",
     "error",
     "container",
     "duration",
@@ -540,7 +546,6 @@ def get_mediainfo(path: Path | str) -> MediainfoRow | None:
 def upsert_mediainfo(
     *,
     path: Path,
-    probed_at: int,
     error: str | None,
     container: str | None,
     duration: float | None,
@@ -562,8 +567,8 @@ def upsert_mediainfo(
 
     Pass ``audio`` / ``internal_subs`` as iterables (possibly empty) to
     replace the cached tracks; pass ``None`` to leave them alone (used
-    when only the error/probed_at fields are being refreshed without
-    new track data — see ``set_mediainfo_duration``).
+    when only the error field is being refreshed without new track data
+    — see ``set_mediainfo_duration``).
     External subtitles aren't touched by this function — they live or
     die with the subtitle files (see ``update_external_subtitles``).
     """
@@ -572,7 +577,6 @@ def upsert_mediainfo(
     cols = ", ".join(MEDIAINFO_COLS)
     values = (
         path_str,
-        probed_at,
         error,
         container,
         duration,
@@ -668,7 +672,6 @@ def set_mediainfo_duration(path: Path, duration: float) -> None:
 
 ARDETECTOR_COLS = (
     "path",
-    "probed_at",
     "error",
     "aspect_primary",
     "aspect_widest",
@@ -691,7 +694,6 @@ def get_ardetector(path: Path | str) -> ArdetectorRow | None:
 def upsert_ardetector(
     *,
     path: Path,
-    probed_at: int,
     error: str | None,
     aspect_primary: float | None,
     aspect_widest: float | None,
@@ -703,7 +705,6 @@ def upsert_ardetector(
         f"INSERT OR REPLACE INTO ardetector ({cols}) VALUES ({placeholders})",
         (
             str(path),
-            probed_at,
             error,
             aspect_primary,
             aspect_widest,
@@ -829,24 +830,22 @@ def list_paths() -> set[str]:
 def library_rows(path_prefix: str) -> list[LibraryRow]:
     """media_file LEFT JOIN mediainfo / ardetector / plex_item.
 
-    A NULL `mediainfo_probed_at` (and the associated columns) means the
-    file is a stub — discovered but not yet probed for track metadata.
-    Same for `ardetector_probed_at`. Audio and subtitle tracks are NOT
-    included here; fetch via ``get_audio_tracks(path)`` /
+    A NULL `mediainfo_error` (and the associated columns) means the file
+    is a stub — discovered but not yet probed for track metadata. Same
+    for `ardetector_error`. Audio and subtitle tracks are NOT included
+    here; fetch via ``get_audio_tracks(path)`` /
     ``get_subtitle_tracks(path)`` as needed.
     """
     media_cols = ", ".join(f"m.{c}" for c in MEDIA_COLS)
-    # mediainfo: skip the duplicate `path` column; alias `probed_at` /
-    # `error` so they don't collide with the ardetector versions.
+    # mediainfo: skip the duplicate `path` column; alias `error` so it
+    # doesn't collide with the ardetector version.
     mi_data = tuple(c for c in MEDIAINFO_COLS if c != "path")
     mi_select = ", ".join(
-        f"mi.{c} AS mediainfo_{c}" if c in {"probed_at", "error"} else f"mi.{c}"
-        for c in mi_data
+        f"mi.{c} AS mediainfo_{c}" if c == "error" else f"mi.{c}" for c in mi_data
     )
     ar_data = tuple(c for c in ARDETECTOR_COLS if c != "path")
     ar_select = ", ".join(
-        f"ar.{c} AS ardetector_{c}" if c in {"probed_at", "error"} else f"ar.{c}"
-        for c in ar_data
+        f"ar.{c} AS ardetector_{c}" if c == "error" else f"ar.{c}" for c in ar_data
     )
     plex_cols = ", ".join(
         f"p.{c} AS plex_{c}" for c in PLEX_ITEM_COLS if c not in {"path", "local_path"}
@@ -865,12 +864,8 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
         )
         .fetchall()
     )
-    mi_names = tuple(
-        f"mediainfo_{c}" if c in {"probed_at", "error"} else c for c in mi_data
-    )
-    ar_names = tuple(
-        f"ardetector_{c}" if c in {"probed_at", "error"} else c for c in ar_data
-    )
+    mi_names = tuple(f"mediainfo_{c}" if c == "error" else c for c in mi_data)
+    ar_names = tuple(f"ardetector_{c}" if c == "error" else c for c in ar_data)
     plex_names = tuple(
         f"plex_{c}" for c in PLEX_ITEM_COLS if c not in {"path", "local_path"}
     )
@@ -958,7 +953,6 @@ PLEX_ITEM_COLS = (
     "season_number",
     "episode_number",
     "local_path",
-    "updated_at",
 )
 
 
@@ -966,7 +960,6 @@ def upsert_plex_item(
     *,
     rating_key: str,
     item_type: str,
-    updated_at: int,
     path_map: dict[str, str],
     title: str | None = None,
     year: int | None = None,
@@ -990,7 +983,6 @@ def upsert_plex_item(
             season_number,
             episode_number,
             local_path,
-            updated_at,
         ),
     )
     return local_path
@@ -1052,32 +1044,26 @@ def delete_plex_rating_keys(keys: list[str]) -> int:
 def upsert_bazarr_movie(
     *,
     radarr_id: int,
-    updated_at: int,
     path_map: dict[str, str],
     remote_path: str | None = None,
 ) -> None:
     local_path = resolve_local_file(remote_path, path_map)
     get_conn().execute(
-        "INSERT OR REPLACE INTO bazarr_movie"
-        " (radarr_id, local_path, updated_at)"
-        " VALUES (?,?,?)",
-        (radarr_id, local_path, updated_at),
+        "INSERT OR REPLACE INTO bazarr_movie (radarr_id, local_path) VALUES (?,?)",
+        (radarr_id, local_path),
     )
 
 
 def upsert_bazarr_series(
     *,
     sonarr_id: int,
-    updated_at: int,
     path_map: dict[str, str],
     remote_path: str | None = None,
 ) -> None:
     local_folder = resolve_local_folder(remote_path, path_map)
     get_conn().execute(
-        "INSERT OR REPLACE INTO bazarr_series"
-        " (sonarr_id, local_folder, updated_at)"
-        " VALUES (?,?,?)",
-        (sonarr_id, local_folder, updated_at),
+        "INSERT OR REPLACE INTO bazarr_series (sonarr_id, local_folder) VALUES (?,?)",
+        (sonarr_id, local_folder),
     )
 
 
@@ -1145,7 +1131,6 @@ def bazarr_series_for_local_path(local_path: str) -> int | None:
 def upsert_radarr_movie(
     *,
     movie_id: int,
-    updated_at: int,
     path_map: dict[str, str],
     tmdb_id: int | None = None,
     remote_path: str | None = None,
@@ -1153,9 +1138,9 @@ def upsert_radarr_movie(
     local_path = resolve_local_file(remote_path, path_map)
     get_conn().execute(
         "INSERT OR REPLACE INTO radarr_movie"
-        " (movie_id, tmdb_id, local_path, updated_at)"
-        " VALUES (?,?,?,?)",
-        (movie_id, tmdb_id, local_path, updated_at),
+        " (movie_id, tmdb_id, local_path)"
+        " VALUES (?,?,?)",
+        (movie_id, tmdb_id, local_path),
     )
 
 
@@ -1186,7 +1171,6 @@ def radarr_tmdb_for_local_path(local_path: str) -> int | None:
 def upsert_sonarr_series(
     *,
     series_id: int,
-    updated_at: int,
     path_map: dict[str, str],
     title_slug: str | None = None,
     remote_path: str | None = None,
@@ -1194,9 +1178,9 @@ def upsert_sonarr_series(
     local_folder = resolve_local_folder(remote_path, path_map)
     get_conn().execute(
         "INSERT OR REPLACE INTO sonarr_series"
-        " (series_id, title_slug, local_folder, updated_at)"
-        " VALUES (?,?,?,?)",
-        (series_id, title_slug, local_folder, updated_at),
+        " (series_id, title_slug, local_folder)"
+        " VALUES (?,?,?)",
+        (series_id, title_slug, local_folder),
     )
 
 

@@ -5,7 +5,6 @@ Deep-link route:
 """
 
 import logging
-import time
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
@@ -56,7 +55,6 @@ async def sync() -> None:
             return
 
         movies = await get_movies(r.url, r.api_key)
-        now = int(time.time())
 
         seen: set[int] = set()
         for m in movies:
@@ -67,7 +65,6 @@ async def sync() -> None:
                 tmdb_id=m.tmdb_id,
                 remote_path=file_path or None,
                 path_map=r.path_map,
-                updated_at=now,
             )
 
         stale = sorted(db.list_radarr_movie_ids() - seen)

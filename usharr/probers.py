@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import NamedTuple
@@ -67,14 +66,12 @@ class MediainfoProber(Prober):
             return
 
         logger.info("mediainfo: %s", path)
-        now = int(time.time())
         try:
             mi = await mediainfo_lib.extract(path)
         except Exception as exc:
             logger.warning("mediainfo failed for %s: %s", path, exc)
             db.upsert_mediainfo(
                 path=path,
-                probed_at=now,
                 error=str(exc)[:500],
                 container=cached.container if cached else None,
                 duration=cached.duration if cached else None,
@@ -95,7 +92,6 @@ class MediainfoProber(Prober):
             v = mi.video
             db.upsert_mediainfo(
                 path=path,
-                probed_at=now,
                 error=None,
                 container=mi.container,
                 duration=mi.duration,
@@ -140,14 +136,12 @@ class ArdetectorProber(Prober):
             return
 
         logger.info("ardetector: %s", path)
-        now = int(time.time())
         try:
             result = await detect(path)
         except Exception as exc:
             logger.warning("ardetector failed for %s: %s", path, exc)
             db.upsert_ardetector(
                 path=path,
-                probed_at=now,
                 error=str(exc)[:500],
                 aspect_primary=None,
                 aspect_widest=None,
@@ -157,7 +151,6 @@ class ArdetectorProber(Prober):
 
         db.upsert_ardetector(
             path=path,
-            probed_at=now,
             error=None,
             aspect_primary=result.primary_aspect,
             aspect_widest=result.widest_aspect,

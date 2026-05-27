@@ -6,7 +6,6 @@ section, and upserts `plex_item` rows. Webhook endpoint (wired in
 """
 
 import logging
-import time
 from typing import Any
 
 import httpx
@@ -100,7 +99,6 @@ def upsert(item: LibMetadata, path_map: dict[str, str]) -> str | None:
         episode_number=item.index,
         remote_path=pick_file(item),
         path_map=path_map,
-        updated_at=int(time.time()),
     )
 
 
