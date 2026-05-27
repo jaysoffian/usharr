@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import usharr.mediainfo as mediainfo_lib
-from usharr import db, subtitles
+from usharr import db
 from usharr.ardetector import detect
 
 logger = logging.getLogger(__name__)
@@ -115,8 +115,6 @@ class MediainfoProber(Prober):
                 ],
             )
 
-        update_external_subs(path, subtitles.find_subtitles(path))
-
 
 class ArdetectorProber(Prober):
     """Slow AR-sampling pass. Doesn't auto-retry persistent failures on
@@ -171,13 +169,3 @@ class ArdetectorProber(Prober):
         # own.
         if result.duration is not None:
             db.set_mediainfo_duration(path, result.duration)
-
-
-def update_external_subs(path: Path, subtitle_paths: list[Path]) -> None:
-    """Re-derive external sub rows numbered after the current internal block."""
-    internal_count = db.count_internal_subs(path)
-    external_subs = [
-        subtitles.parse_subtitle(path.stem, s, internal_count + i)
-        for i, s in enumerate(subtitle_paths)
-    ]
-    db.update_external_subtitles(path=path, subtitles=external_subs)

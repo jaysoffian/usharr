@@ -758,11 +758,13 @@ def get_audio_tracks(path: str) -> list[AudioTrackRow]:
 
 
 def get_subtitle_tracks(path: str) -> list[SubtitleTrackRow]:
+    """Internal subs (by their own idx) first, then externals (by idx)."""
     cols = ", ".join(SUBTITLE_COLS)
     rows = (
         get_conn()
         .execute(
-            f"SELECT {cols} FROM subtitle_track WHERE path = ? ORDER BY idx",
+            f"SELECT {cols} FROM subtitle_track WHERE path = ?"
+            " ORDER BY source = 'external', idx",
             (path,),
         )
         .fetchall()
@@ -773,19 +775,6 @@ def get_subtitle_tracks(path: str) -> list[SubtitleTrackRow]:
     ]
 
 
-def count_internal_subs(path: Path) -> int:
-    row = (
-        get_conn()
-        .execute(
-            "SELECT COUNT(*) FROM subtitle_track"
-            " WHERE path = ? AND source = 'internal'",
-            (str(path),),
-        )
-        .fetchone()
-    )
-    return row[0] if row else 0
-
-
 def update_external_subtitles(
     *,
     path: Path,
@@ -794,8 +783,8 @@ def update_external_subtitles(
     """Replace only the external subtitle_track rows.
 
     Caller is responsible for keeping ``media_file.subtitles_mtime_ns``
-    in sync via ``update_media_file_stat`` / ``insert_media_file`` —
-    discovery state lives on the discovery row.
+    in sync via ``upsert_media_file`` — discovery state lives on the
+    discovery row.
     """
     path_str = str(path)
     conn = get_conn()

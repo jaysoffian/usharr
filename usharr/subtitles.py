@@ -3,6 +3,7 @@
 import logging
 from pathlib import Path
 
+from usharr import db
 from usharr.db import SubtitleTrackRow
 from usharr.langs import norm_lang
 
@@ -95,3 +96,9 @@ def parse_subtitle(video_stem: str, path: Path, idx: int) -> SubtitleTrackRow:
         is_forced=forced,
         is_sdh=sdh,
     )
+
+
+def update_external_subs(path: Path, subtitle_paths: list[Path]) -> None:
+    """Replace external sub rows for `path` from the current on-disk files."""
+    rows = [parse_subtitle(path.stem, s, i) for i, s in enumerate(subtitle_paths)]
+    db.update_external_subtitles(path=path, subtitles=rows)

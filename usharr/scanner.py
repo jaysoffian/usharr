@@ -9,7 +9,7 @@ from typing import NamedTuple
 
 from usharr import bazarr_sync, db, plex_sync, radarr_sync, sonarr_sync, subtitles
 from usharr.config import get_config
-from usharr.probers import ArdetectorProber, MediainfoProber, update_external_subs
+from usharr.probers import ArdetectorProber, MediainfoProber
 
 logger = logging.getLogger(__name__)
 
@@ -176,11 +176,10 @@ class Scanner:
             self.mediainfo.enqueue(path, force=req.force_refresh)
             self.ardetector.enqueue(path, force=req.force_detect)
 
-            # When only subs changed, the mediainfo prober will skip and
-            # won't refresh external subs — handle that case here.
-            if not video_changed and subtitles_changed and not req.force_refresh:
-                update_external_subs(path, subtitle_paths)
-                subtitle_only += 1
+            if subtitles_changed:
+                subtitles.update_external_subs(path, subtitle_paths)
+                if not video_changed:
+                    subtitle_only += 1
 
         logger.info(
             "scan walk complete: videos=%d removed=%d stubs=%d "

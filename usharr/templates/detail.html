@@ -73,7 +73,7 @@
   <tbody>
   {% for t in subtitle %}
     <tr>
-      <td>{{ t.idx }}</td>
+      <td>{{ loop.index }}</td>
       <td>{{ t.codec or '?' }}</td>
       <td>{{ t.lang_display }}</td>
       <td class="wrap">{{ t.title or '' }}</td>
