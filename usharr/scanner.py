@@ -50,11 +50,13 @@ class Scanner:
         req: ScanRequest,
     ) -> None:
         """Add ScanRequest to queue."""
-        if req.path:
-            self.mediainfo.enqueue(req.path)
-            self.ardetector.enqueue(req.path)
-        else:
+        if req.path is None:
             self.queue.put_nowait(req)
+            return
+        if req.force_refresh:
+            self.mediainfo.enqueue(req.path)
+        if req.force_detect:
+            self.ardetector.enqueue(req.path)
 
     def start(self) -> None:
         """Spawn every long-lived worker. Call once from lifespan / CLI."""
