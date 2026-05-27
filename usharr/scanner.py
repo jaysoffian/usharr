@@ -108,7 +108,7 @@ class Scanner:
                 self.queue.task_done()
 
     @staticmethod
-    def walk_videos() -> list[Path]:
+    def find_video_files() -> list[Path]:
         found: list[Path] = []
         for root in get_config().all_paths:
             root_path = Path(root)
@@ -129,7 +129,7 @@ class Scanner:
         )
         start = time.monotonic()
 
-        videos = self.walk_videos()
+        videos = self.find_video_files()
         db.delete_orphans(videos)
 
         for path in videos:
@@ -141,17 +141,13 @@ class Scanner:
 
             subtitle_paths = subtitles.find_subtitles(path)
             subtitles_mtime = subtitles.mtime_ns_max(subtitle_paths)
-            mf = db.get(path)
-
-            if mf is None:
-                video_changed = subtitles_changed = True
-            else:
-                video_changed = (
-                    mf.size_bytes != st.st_size or mf.mtime_ns != st.st_mtime_ns
-                )
+            if mf := db.get(path):
+                changed = mf.size_bytes != st.st_size or mf.mtime_ns != st.st_mtime_ns
                 subtitles_changed = mf.subtitles_mtime_ns != subtitles_mtime
+            else:
+                changed = subtitles_changed = True
 
-            if mf is None or video_changed or subtitles_changed:
+            if changed or subtitles_changed:
                 db.upsert_media_file(
                     path=path,
                     size_bytes=st.st_size,
@@ -159,8 +155,7 @@ class Scanner:
                     subtitles_mtime_ns=subtitles_mtime,
                 )
 
-            # Probers do their own change detection and skip unchanged
-            # files; just enqueue everything.
+            # Probers skip unchanged files on their own
             self.mediainfo.enqueue(path, force=req.force_refresh)
             self.ardetector.enqueue(path, force=req.force_detect)
 
