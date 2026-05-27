@@ -1,6 +1,7 @@
 """Container/codec/track extraction via pymediainfo."""
 
 import asyncio
+import dataclasses
 import json
 import logging
 import re
@@ -11,7 +12,7 @@ from pathlib import Path
 
 from pymediainfo import MediaInfo
 
-from usharr.db import AudioTrackRow, SubtitleTrackRow
+from usharr.db import AudioTrackRow, MediainfoRow, SubtitleTrackRow
 from usharr.langs import norm_lang
 
 logger = logging.getLogger(__name__)
@@ -567,4 +568,28 @@ def to_internal_sub_row(s: SubtitleTrack) -> SubtitleTrackRow:
         is_default=s.is_default,
         is_forced=s.is_forced,
         is_sdh=s.is_sdh,
+    )
+
+
+def to_mediainfo_row(path: Path, mi: MediaInfoResult) -> MediainfoRow:
+    base = MediainfoRow(
+        path=str(path),
+        container=mi.container,
+        duration=mi.duration,
+    )
+    if mi.video is None:
+        return base
+    v = mi.video
+    return dataclasses.replace(
+        base,
+        video_codec=v.codec,
+        video_profile=v.profile,
+        video_width=v.width or None,
+        video_height=v.height or None,
+        video_bit_depth=v.bit_depth,
+        video_hdr=v.hdr,
+        video_hdr_format=v.hdr_format,
+        video_frame_rate=v.frame_rate,
+        video_bit_rate=v.bit_rate,
+        video_max_bit_rate=v.max_bit_rate,
     )

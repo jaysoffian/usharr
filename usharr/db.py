@@ -171,19 +171,19 @@ class MediaFileRow:
 @dataclass(frozen=True, slots=True)
 class MediainfoRow:
     path: str
-    error: str | None
-    container: str | None
-    duration: float | None
-    video_codec: str | None
-    video_profile: str | None
-    video_width: int | None
-    video_height: int | None
-    video_bit_depth: int | None
-    video_hdr: str | None
-    video_hdr_format: str | None
-    video_frame_rate: float | None
-    video_bit_rate: int | None
-    video_max_bit_rate: int | None
+    error: str | None = None
+    container: str | None = None
+    duration: float | None = None
+    video_codec: str | None = None
+    video_profile: str | None = None
+    video_width: int | None = None
+    video_height: int | None = None
+    video_bit_depth: int | None = None
+    video_hdr: str | None = None
+    video_hdr_format: str | None = None
+    video_frame_rate: float | None = None
+    video_bit_rate: int | None = None
+    video_max_bit_rate: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,53 +544,19 @@ def get_mediainfo(path: Path | str) -> MediainfoRow | None:
 
 
 def upsert_mediainfo(
+    row: MediainfoRow,
     *,
-    path: Path,
-    error: str | None,
-    container: str | None,
-    duration: float | None,
-    video_codec: str | None,
-    video_profile: str | None,
-    video_width: int | None,
-    video_height: int | None,
-    video_bit_depth: int | None,
-    video_hdr: str | None,
-    video_hdr_format: str | None,
-    video_frame_rate: float | None,
-    video_bit_rate: int | None,
-    video_max_bit_rate: int | None,
-    audio: Iterable[AudioTrackRow] | None = None,
-    internal_subs: Iterable[SubtitleTrackRow] | None = None,
+    audio: Iterable[AudioTrackRow],
+    internal_subs: Iterable[SubtitleTrackRow],
 ) -> None:
-    """Upsert the mediainfo row and (optionally) replace the file's
-    audio + internal subtitle tracks.
-
-    Pass ``audio`` / ``internal_subs`` as iterables (possibly empty) to
-    replace the cached tracks; pass ``None`` to leave them alone (used
-    when only the error field is being refreshed without new track data
-    — see ``set_mediainfo_duration``).
-    External subtitles aren't touched by this function — they live or
-    die with the subtitle files (see ``update_external_subtitles``).
+    """Upsert the mediainfo row and replace the file's audio + internal
+    subtitle tracks. External subtitles aren't touched (they live or die
+    with the subtitle files — see ``update_external_subtitles``).
     """
-    path_str = str(path)
+    path_str = row.path
     placeholders = ", ".join("?" * len(MEDIAINFO_COLS))
     cols = ", ".join(MEDIAINFO_COLS)
-    values = (
-        path_str,
-        error,
-        container,
-        duration,
-        video_codec,
-        video_profile,
-        video_width,
-        video_height,
-        video_bit_depth,
-        video_hdr,
-        video_hdr_format,
-        video_frame_rate,
-        video_bit_rate,
-        video_max_bit_rate,
-    )
+    values = tuple(getattr(row, c) for c in MEDIAINFO_COLS)
     conn = get_conn()
     conn.execute("BEGIN")
     try:
@@ -598,63 +564,72 @@ def upsert_mediainfo(
             f"INSERT OR REPLACE INTO mediainfo ({cols}) VALUES ({placeholders})",
             values,
         )
-        if audio is not None:
-            conn.execute("DELETE FROM audio_track WHERE path = ?", (path_str,))
-            for t in audio:
-                conn.execute(
-                    "INSERT INTO audio_track"
-                    " (path, idx, codec, channels, layout, language, title,"
-                    "  is_default, is_forced, format, commercial_name,"
-                    "  bit_rate, bit_rate_mode, sample_rate, bit_depth,"
-                    "  compression_mode)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        path_str,
-                        t.idx,
-                        t.codec,
-                        t.channels,
-                        t.layout,
-                        t.language,
-                        t.title,
-                        1 if t.is_default else 0,
-                        1 if t.is_forced else 0,
-                        t.format,
-                        t.commercial_name,
-                        t.bit_rate,
-                        t.bit_rate_mode,
-                        t.sample_rate,
-                        t.bit_depth,
-                        t.compression_mode,
-                    ),
-                )
-        if internal_subs is not None:
+        conn.execute("DELETE FROM audio_track WHERE path = ?", (path_str,))
+        for t in audio:
             conn.execute(
-                "DELETE FROM subtitle_track WHERE path = ? AND source = 'internal'",
-                (path_str,),
+                "INSERT INTO audio_track"
+                " (path, idx, codec, channels, layout, language, title,"
+                "  is_default, is_forced, format, commercial_name,"
+                "  bit_rate, bit_rate_mode, sample_rate, bit_depth,"
+                "  compression_mode)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    path_str,
+                    t.idx,
+                    t.codec,
+                    t.channels,
+                    t.layout,
+                    t.language,
+                    t.title,
+                    1 if t.is_default else 0,
+                    1 if t.is_forced else 0,
+                    t.format,
+                    t.commercial_name,
+                    t.bit_rate,
+                    t.bit_rate_mode,
+                    t.sample_rate,
+                    t.bit_depth,
+                    t.compression_mode,
+                ),
             )
-            for t in internal_subs:
-                conn.execute(
-                    "INSERT INTO subtitle_track"
-                    " (path, idx, source, file_path, codec, language, title,"
-                    "  is_default, is_forced, is_sdh)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        path_str,
-                        t.idx,
-                        "internal",
-                        t.file_path,
-                        t.codec,
-                        t.language,
-                        t.title,
-                        1 if t.is_default else 0,
-                        1 if t.is_forced else 0,
-                        1 if t.is_sdh else 0,
-                    ),
-                )
+        conn.execute(
+            "DELETE FROM subtitle_track WHERE path = ? AND source = 'internal'",
+            (path_str,),
+        )
+        for t in internal_subs:
+            conn.execute(
+                "INSERT INTO subtitle_track"
+                " (path, idx, source, file_path, codec, language, title,"
+                "  is_default, is_forced, is_sdh)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    path_str,
+                    t.idx,
+                    "internal",
+                    t.file_path,
+                    t.codec,
+                    t.language,
+                    t.title,
+                    1 if t.is_default else 0,
+                    1 if t.is_forced else 0,
+                    1 if t.is_sdh else 0,
+                ),
+            )
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
+
+
+def set_mediainfo_error(path: Path, error: str) -> None:
+    """Record an error on the mediainfo row, preserving any cached track
+    metadata. Inserts a near-blank row if none exists.
+    """
+    get_conn().execute(
+        "INSERT INTO mediainfo (path, error) VALUES (?, ?)"
+        " ON CONFLICT(path) DO UPDATE SET error = excluded.error",
+        (str(path), error),
+    )
 
 
 def set_mediainfo_duration(path: Path, duration: float) -> None:

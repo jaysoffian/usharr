@@ -48,51 +48,18 @@ class MediainfoProber(Prober):
 
     async def probe(self, path: Path) -> None:
         logger.info("mediainfo: %s", path)
-        cached = db.get_mediainfo(path)
         try:
             mi = await mediainfo_lib.extract(path)
         except Exception as exc:
             logger.warning("mediainfo failed for %s: %s", path, exc)
-            db.upsert_mediainfo(
-                path=path,
-                error=str(exc)[:500],
-                container=cached.container if cached else None,
-                duration=cached.duration if cached else None,
-                video_codec=cached.video_codec if cached else None,
-                video_profile=cached.video_profile if cached else None,
-                video_width=cached.video_width if cached else None,
-                video_height=cached.video_height if cached else None,
-                video_bit_depth=cached.video_bit_depth if cached else None,
-                video_hdr=cached.video_hdr if cached else None,
-                video_hdr_format=cached.video_hdr_format if cached else None,
-                video_frame_rate=cached.video_frame_rate if cached else None,
-                video_bit_rate=cached.video_bit_rate if cached else None,
-                video_max_bit_rate=cached.video_max_bit_rate if cached else None,
-                audio=None,
-                internal_subs=None,
-            )
-        else:
-            v = mi.video
-            db.upsert_mediainfo(
-                path=path,
-                error=None,
-                container=mi.container,
-                duration=mi.duration,
-                video_codec=v.codec if v else None,
-                video_profile=v.profile if v else None,
-                video_width=(v.width or None) if v else None,
-                video_height=(v.height or None) if v else None,
-                video_bit_depth=v.bit_depth if v else None,
-                video_hdr=v.hdr if v else None,
-                video_hdr_format=v.hdr_format if v else None,
-                video_frame_rate=v.frame_rate if v else None,
-                video_bit_rate=v.bit_rate if v else None,
-                video_max_bit_rate=v.max_bit_rate if v else None,
-                audio=[mediainfo_lib.to_audio_row(a) for a in mi.audio],
-                internal_subs=[
-                    mediainfo_lib.to_internal_sub_row(s) for s in mi.subtitle
-                ],
-            )
+            db.set_mediainfo_error(path, str(exc)[:500])
+            return
+
+        db.upsert_mediainfo(
+            mediainfo_lib.to_mediainfo_row(path, mi),
+            audio=[mediainfo_lib.to_audio_row(a) for a in mi.audio],
+            internal_subs=[mediainfo_lib.to_internal_sub_row(s) for s in mi.subtitle],
+        )
 
 
 class ArdetectorProber(Prober):
