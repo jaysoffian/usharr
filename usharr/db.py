@@ -189,10 +189,10 @@ class MediainfoRow:
 @dataclass(frozen=True, slots=True)
 class ArdetectorRow:
     path: str
-    error: str | None
-    aspect_primary: float | None
-    aspect_widest: float | None
-    aspect_samples: str | None
+    error: str | None = None
+    aspect_primary: float | None = None
+    aspect_widest: float | None = None
+    aspect_samples: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -666,25 +666,13 @@ def get_ardetector(path: Path | str) -> ArdetectorRow | None:
     return make_row(ArdetectorRow, ARDETECTOR_COLS, row)
 
 
-def upsert_ardetector(
-    *,
-    path: Path,
-    error: str | None,
-    aspect_primary: float | None,
-    aspect_widest: float | None,
-    aspect_samples: str | None,
-) -> None:
+def upsert_ardetector(row: ArdetectorRow) -> None:
     cols = ", ".join(ARDETECTOR_COLS)
     placeholders = ", ".join("?" * len(ARDETECTOR_COLS))
+    values = tuple(getattr(row, c) for c in ARDETECTOR_COLS)
     get_conn().execute(
         f"INSERT OR REPLACE INTO ardetector ({cols}) VALUES ({placeholders})",
-        (
-            str(path),
-            error,
-            aspect_primary,
-            aspect_widest,
-            aspect_samples,
-        ),
+        values,
     )
 
 

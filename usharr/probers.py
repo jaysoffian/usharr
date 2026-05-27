@@ -6,14 +6,10 @@ queueing.
 """
 
 import asyncio
-import json
 import logging
-from dataclasses import asdict
 from pathlib import Path
 
-import usharr.mediainfo as mediainfo_lib
-from usharr import db
-from usharr.ardetector import detect
+from usharr import ardetector, db, mediainfo
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +45,16 @@ class MediainfoProber(Prober):
     async def probe(self, path: Path) -> None:
         logger.info("mediainfo: %s", path)
         try:
-            mi = await mediainfo_lib.extract(path)
+            mi = await mediainfo.extract(path)
         except Exception as exc:
             logger.warning("mediainfo failed for %s: %s", path, exc)
             db.set_mediainfo_error(path, str(exc)[:500])
             return
 
         db.upsert_mediainfo(
-            mediainfo_lib.to_mediainfo_row(path, mi),
-            audio=[mediainfo_lib.to_audio_row(a) for a in mi.audio],
-            internal_subs=[mediainfo_lib.to_internal_sub_row(s) for s in mi.subtitle],
+            mediainfo.to_mediainfo_row(path, mi),
+            audio=[mediainfo.to_audio_row(a) for a in mi.audio],
+            internal_subs=[mediainfo.to_internal_sub_row(s) for s in mi.subtitle],
         )
 
 
@@ -68,28 +64,14 @@ class ArdetectorProber(Prober):
     async def probe(self, path: Path) -> None:
         logger.info("ardetector: %s", path)
         try:
-            result = await detect(path)
+            result = await ardetector.detect(path)
         except Exception as exc:
             logger.warning("ardetector failed for %s: %s", path, exc)
-            db.upsert_ardetector(
-                path=path,
-                error=str(exc)[:500],
-                aspect_primary=None,
-                aspect_widest=None,
-                aspect_samples=None,
-            )
+            db.upsert_ardetector(db.ArdetectorRow(path=str(path), error=str(exc)[:500]))
             return
 
-        db.upsert_ardetector(
-            path=path,
-            error=None,
-            aspect_primary=result.primary_aspect,
-            aspect_widest=result.widest_aspect,
-            aspect_samples=json.dumps([asdict(d) for d in result.detected]),
-        )
-        # Backfill duration onto mediainfo if mediainfo didn't get one
-        # (the AR sampler measures runtime as a side effect). No-op if
-        # the mediainfo row doesn't exist yet — that pass will fill its
-        # own.
+        db.upsert_ardetector(ardetector.to_ardetector_row(path, result))
+        # Backfill duration onto mediainfo if mediainfo didn't get one since
+        # the AR sampler measures runtime as a side effect.
         if result.duration is not None:
             db.set_mediainfo_duration(path, result.duration)

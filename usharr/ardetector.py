@@ -9,8 +9,10 @@ import json
 import logging
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+from usharr.db import ArdetectorRow
 
 logger = logging.getLogger(__name__)
 
@@ -887,4 +889,13 @@ async def detect(path: Path) -> DetectionResult:
         ar_histogram=ar_hist,
         width_histogram=w_hist,
         height_histogram=h_hist,
+    )
+
+
+def to_ardetector_row(path: Path, result: DetectionResult) -> ArdetectorRow:
+    return ArdetectorRow(
+        path=str(path),
+        aspect_primary=result.primary_aspect,
+        aspect_widest=result.widest_aspect,
+        aspect_samples=json.dumps([asdict(d) for d in result.detected]),
     )
