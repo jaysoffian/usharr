@@ -99,12 +99,12 @@ async def sync() -> None:
         db.delete_bazarr_movies(stale_movies)
         db.delete_bazarr_series(stale_series)
 
-        summary = {
-            "movies": len(movies_resp.data),
-            "series": len(series_resp.data),
-            "removed_movies": len(stale_movies),
-            "removed_series": len(stale_series),
-        }
-        logger.info("bazarr_sync: %s", summary)
+        logger.info(
+            "bazarr_sync: movies=%d removed=%d / series=%d removed=%d",
+            len(movies_resp.data),
+            len(stale_movies),
+            len(series_resp.data),
+            len(stale_series),
+        )
     except Exception:
         logger.exception("bazarr_sync errored")
