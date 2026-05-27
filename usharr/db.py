@@ -929,11 +929,11 @@ def library_tracks(
     return audio, subtitle
 
 
-def delete_orphans(present: Iterable[Path | str]) -> int:
+def delete_orphans(present: Iterable[Path | str]) -> None:
     """Delete media_file rows whose path is not in `present`."""
     orphans = sorted(list_paths() - {str(p) for p in present})
     if not orphans:
-        return 0
+        return
     conn = get_conn()
     total = 0
     for i in range(0, len(orphans), 500):
@@ -944,7 +944,7 @@ def delete_orphans(present: Iterable[Path | str]) -> int:
             chunk,
         )
         total += cur.rowcount or 0
-    return total
+    logger.info("Removed %d stale row(s) from DB", total)
 
 
 # --- plex_item ------------------------------------------------------------

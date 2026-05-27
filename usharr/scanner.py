@@ -108,9 +108,9 @@ class Scanner:
                 self.queue.task_done()
 
     @staticmethod
-    def walk_videos(roots: list[str]) -> list[Path]:
+    def walk_videos() -> list[Path]:
         found: list[Path] = []
-        for root in roots:
+        for root in get_config().all_paths:
             root_path = Path(root)
             if not root_path.is_dir():
                 logger.warning("Scan root %s is missing or not a directory", root)
@@ -124,22 +124,13 @@ class Scanner:
 
     async def scan(self, /, req: ScanRequest) -> None:
         """Scan for new/updated media files and/or refresh/analyze existing files."""
-        roots = get_config().all_paths
         logger.info(
-            "scan walk starting across %d root(s) refresh=%s analyze=%s",
-            len(roots),
-            req.refresh,
-            req.analyze,
+            "scan walk starting refresh=%s analyze=%s", req.refresh, req.analyze
         )
         start = time.monotonic()
 
-        videos = self.walk_videos(roots)
-        removed = db.delete_orphans(videos)
-        if removed:
-            logger.info("Removed %d stale row(s) from DB", removed)
-
-        stubs = 0
-        subtitle_only = 0
+        videos = self.walk_videos()
+        db.delete_orphans(videos)
 
         for path in videos:
             try:
@@ -153,7 +144,6 @@ class Scanner:
             mf = db.get(path)
 
             if mf is None:
-                stubs += 1
                 video_changed = subtitles_changed = True
             else:
                 video_changed = (
@@ -176,18 +166,8 @@ class Scanner:
 
             if subtitles_changed:
                 subtitles.update_external_subs(path, subtitle_paths)
-                if not video_changed:
-                    subtitle_only += 1
 
-        logger.info(
-            "scan walk complete: videos=%d removed=%d stubs=%d "
-            "subtitle_only=%d elapsed=%.1fs",
-            len(videos),
-            removed,
-            stubs,
-            subtitle_only,
-            time.monotonic() - start,
-        )
+        logger.info("scan walk complete: elapsed=%.1fs", time.monotonic() - start)
 
 
 scanner = Scanner()
