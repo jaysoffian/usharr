@@ -2,11 +2,11 @@
 
 Usharr is a web application and API that complements Plex Media Server, Sonarr, Radarr, Bazarr and Tautulli. It scans your video files, extracting their metadata via `mediainfo` and determining their _actual_ aspect ratio(s) by sampling each video with `ffmpeg cropdetect`.
 
-For each file, the web UI presents its aspect ratio(s), video info (SDR, HDR, DV, etc), audio info (language, codec, channels, surround sound type), and subtitle info (language, type).
+For each file, the web UI presents its aspect ratio(s), video info (SDR, HDR, DV, color or monochrome, etc), audio info (language, codec, channels, surround sound type), and subtitle info (language, type).
 
 It links from each file directly to its entry in your Plex Media Server, Sonarr, Radarr, Bazarr and Tautulli installations.
 
-Usharr operates solely offline, extracting the information already in your video files. It does *not* organize your files nor does it connect to any online server (TMDb, IMDb, etc). There are already better programs that fill those roles. Usharr's purpose is to capture and present both via web UI and API the technical details of your media files.
+Usharr operates entirely offline, extracting the information already in your video files. It does *not* organize your files nor does it connect to any online service (TMDb, IMDb, etc). There are already better programs that fill those roles. Usharr's purpose is to capture and present both via web UI and API the technical details of your media files.
 
 ## Configuration
 
@@ -16,7 +16,7 @@ Paths are scanned recursively for files with a video extension (`.avi`, `.iso`, 
 
 ### Integrations and Path Matching
 
-The configuration file allows for integrations with Plex, Bazarr, Radarr, Sonarr, and Tautulli. All of these except for Tautulli require Usharr to match paths reported to it by the integrations against the paths in its own DB. If these paths are not the same for any given integration, you must configure `path_map` for that integration. e.g.
+The configuration file allows for integrations with Plex, Bazarr, Radarr, Sonarr, and Tautulli. All of these except for Tautulli require Usharr to match the paths it discovers against the paths reported to it by the integrations. If these paths are not the same for any given integration, you must configure `path_map` for that integration. e.g.
 
 ```yaml
 plex:
@@ -31,17 +31,17 @@ This would allow Usharr to match `/media/Movies/Brazil (1985)/Brazil (1985).mkv`
 
 ### Application menu
 
--  **Scan Library**: Scan for added/removed files. Mediainfo and AR analysis run on new or changed files. (Sync with Plex and *arr integrations happens automatically on the hourly reconcile cycle.)
+-  **Scan Library**: Scan for added/removed/changed files. Sync with integrations. Mediainfo and aspect-ratio detection are run on new or changed files.
 -  **Refresh Library**: Re-run `mediainfo` on every file.
--  **Analyze Library…**: Re-run `mediainfo` and perform fresh AR analysis on every file.
+-  **Analyze Library…**: Re-run `mediainfo` and aspect-ration detecion on every file.
 
 ### Library pages
 
-One page per entry in `library` with a table on each page with one row per media item and the following columns: Title, Year, AR, Video, Audio, Eng Subs, Linksa
+One page per entry in `library` with a table on each page with one row per media item and the following columns: Title, Year, AR, Video, Audio, Eng Subs, Integrations.
 
-Title gets an edition badge when the filename carries the Plex/Jellyfin `{edition-NAME}` tag; year falls back to a parsed `(YYYY)` when Plex has no entry.
+Title gets an edition badge when the filename carries an `{edition-NAME}` tag; year falls back to a parsed `(YYYY)` when Plex has no entry.
 
-Rows whose last probe errored are highlighted red.
+Rows highlighted red failed when running `mediainfo` on them.
 
 TV libraries roll episodes up under show + season header rows — click a show header to toggle all of its seasons, click a season header for just that one, or click the table header to flip the whole library.
 
@@ -51,19 +51,18 @@ Files living under a Plex-style extras subfolder (`Extras`, `Interviews`, `Featu
 
 The detail pages contain sections for video, audio, subtitles and aspect ratio.
 
-- Video: codec, profile, resolution, bit depth, HDR, frame rate, bit rate, container, duration.
+- Video: codec, profile, resolution, bit depth, HDR, Color (Color, % Color w/monochrome scenes, % Monochrome w/color scenes, or Monochrome), frame rate, bit rate, container, duration.
 - Audio: track #, language, title, default, forced, technical details
 - Subtitles: subtitle #, format, language, title, default, forced, SDH, filename extension.
 - Aspect ratio: AR and runtime percentage.
 
 ### Integration buttons
 
-There are buttons on all pages which link directly to the media item in any configured integrations: Plex, Tautulli, Radarr or Sonarr and Bazarr. This allows you to quickly jump from Usharr to one of the integrations to get additional details not already presented by Usharr.
-
+Integration buttons link directly to the media item in any configured integrations: Plex, Tautulli, Radarr or Sonarr and Bazarr. This allows you to quickly jump from Usharr to one of the integrations to get additional details not already present in Usharr.
 
 ## HTTP API
 
-- `/api/` JSON API, documented at `/docs` (Swagger UI) and `/redoc` (ReDoc)
+- `/api` JSON API, documented at `/docs` (Swagger UI) and `/redoc` (ReDoc)
 - `/health` for monitoring
 
 Example queries:
@@ -121,28 +120,9 @@ Example response:
 }
 ```
 
-### Triggers
-
-The web UI calls various task APIs:
-
-```bash
-# Incremental scan — picks up new files, re-probes changed ones.
-curl -X POST http://usharr:8555/api/task/scan
-
-# Force-refresh mediainfo on every file. Cached AR data preserved.
-curl -X POST http://usharr:8555/api/task/refresh
-
-# Force re-probe everything, including ardetector cropdetect. Slow.
-curl -X POST http://usharr:8555/api/task/analyze
-
-# Single-file variants of refresh / analyze (always force).
-curl -X POST 'http://usharr:8555/api/task/refresh/media/Movies/Dune%202021.mkv'
-curl -X POST 'http://usharr:8555/api/task/analyze/media/Movies/Dune%202021.mkv'
-```
-
 ### Webhooks
 
-Point Plex Server → Settings → Webhooks at `http://usharr:8555/api/webhook`. On `library.new`, Usharr resolves the referenced `plex_item` to its local path and enqueues a probe for it.
+Point Plex Server → Settings → Webhooks at `http://usharr:8555/api/webhook`. On `library.new`, Usharr does a scan for new items.
 
 ## Plex
 
@@ -158,8 +138,6 @@ usharr auth --status   # show the link state
 usharr auth --reset    # forget the stored token
 ```
 
-Usharr matches media files against Plex's reported paths by longest path suffix.
-
 ## Podman
 
 ```bash
@@ -170,7 +148,7 @@ make build
 make image
 ```
 
-The `/config` volume expects a directory containing `config.yaml`; `usharr.db` is created alongside it. Media tree mounts should be read-only.
+The `/config` volume expects a directory containing `config.yaml`; `usharr.db` is created alongside it. Media tree mounts can be read-only.
 
 Sample compose file:
 
