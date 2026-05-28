@@ -2,7 +2,7 @@
 
 Usharr is a web application and API that complements Plex Media Server, Sonarr, Radarr, Bazarr and Tautulli. It scans your video files, extracting their metadata via `mediainfo` and determining their _actual_ aspect ratio(s) by sampling each video with `ffmpeg cropdetect`.
 
-For each file, [the web UI](https://github.com/jaysoffian/usharr/wiki#movies) presents its aspect ratio(s), video info (SDR, HDR, DV, color or monochrome, etc), audio info (language, codec, channels, surround sound type), and subtitle info (language, type).
+For each file, [the web UI](https://github.com/jaysoffian/usharr/wiki/Web-UI) presents its aspect ratio(s), video info (SDR, HDR, DV, color or monochrome, etc), audio info (language, codec, channels, surround sound type), and subtitle info (language, type).
 
 It links from each file directly to its entry in your Plex Media Server, Sonarr, Radarr, Bazarr and Tautulli installations.
 
@@ -29,7 +29,7 @@ This would allow Usharr to match `/media/Movies/Brazil (1985)/Brazil (1985).mkv`
 
 ## Web UI
 
-See https://github.com/jaysoffian/usharr/wiki#movies for screenshots.
+See https://github.com/jaysoffian/usharr/wiki/Web-UI for screenshots.
 
 ### Application menu
 
