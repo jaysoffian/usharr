@@ -11,8 +11,6 @@ from pathlib import Path
 
 from usharr import ardetector, db, mediainfo
 
-logger = logging.getLogger(__name__)
-
 
 class Prober:
     """Long-lived per-pass worker. Subclass and implement ``probe()``."""
@@ -20,6 +18,7 @@ class Prober:
     def __init__(self) -> None:
         self.queue: asyncio.Queue[Path] = asyncio.Queue()
         self.pending: set[Path] = set()
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def enqueue(self, path: Path) -> None:
         if path in self.pending:
@@ -34,9 +33,10 @@ class Prober:
             self.pending.discard(path)
             try:
                 if path.exists():
+                    self.logger.info("probe %s (qsize %d)", path, self.queue.qsize())
                     await self.probe(path)
             except Exception as e:
-                logger.exception("%s: %s", path, str(e))
+                self.logger.exception("%s: %s", path, str(e))
             finally:
                 self.queue.task_done()
 
@@ -48,11 +48,10 @@ class MediainfoProber(Prober):
     """Extract Media Info"""
 
     async def probe(self, path: Path) -> None:
-        logger.info("mediainfo: %s", path)
         try:
             mi = await mediainfo.extract(path)
         except Exception as exc:
-            logger.warning("mediainfo failed for %s: %s", path, exc)
+            self.logger.exception("%s: %s", path, exc)
             db.set_mediainfo_error(path, str(exc)[:500])
             return
 
@@ -67,11 +66,10 @@ class ArdetectorProber(Prober):
     """Detect Aspect Ratios"""
 
     async def probe(self, path: Path) -> None:
-        logger.info("ardetector: %s", path)
         try:
             result = await ardetector.detect(path)
         except Exception as exc:
-            logger.warning("ardetector failed for %s: %s", path, exc)
+            self.logger.exception("%s: %s", path, exc)
             db.upsert_ardetector(db.ArdetectorRow(path=str(path), error=str(exc)[:500]))
             return
 
