@@ -164,7 +164,7 @@ def library_sort_key(r: db.LibraryRow) -> tuple:
         or fmt.format_display_title(r.path, None, None)
     )
     return (
-        fmt.sort_normalize(primary),
+        fmt.natural_sort_key(primary),
         r.plex_season_number or 0,
         r.plex_episode_number or 0,
         r.path,

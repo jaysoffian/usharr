@@ -673,6 +673,8 @@ def format_season_episode(season: int | None, episode: int | None) -> str:
 
 SORT_ARTICLES = ("the ", "a ", "an ")
 
+DIGIT_RUN_RE = re.compile(r"(\d+)")
+
 
 def sort_normalize(s: str) -> str:
     """Casefold and strip a leading English article for library sorting."""
@@ -681,6 +683,15 @@ def sort_normalize(s: str) -> str:
         if t.startswith(prefix):
             return t[len(prefix) :]
     return t
+
+
+def natural_sort_key(s: str) -> tuple:
+    """Sort key whose digit runs compare numerically, after sort_normalize."""
+    return tuple(
+        (0, int(p)) if p.isdigit() else (1, p)
+        for p in DIGIT_RUN_RE.split(sort_normalize(s))
+        if p
+    )
 
 
 def format_display_title(

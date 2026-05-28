@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from usharr import bazarr_sync, db, plex_sync, radarr_sync, sonarr_sync, subtitles
+from usharr import format as fmt
 from usharr.config import get_config
 from usharr.probers import ArdetectorProber, MediainfoProber
 
@@ -114,12 +115,18 @@ class Scanner:
             if not root_path.is_dir():
                 logger.warning("Scan root %s is missing or not a directory", root)
                 continue
-            found.extend(
+            paths = (
                 p
                 for p in root_path.rglob("*")
                 if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
             )
-        return sorted(found, key=lambda p: str(p).lower())
+            found.extend(
+                sorted(
+                    paths,
+                    key=lambda p: fmt.natural_sort_key(str(p.relative_to(root_path))),
+                )
+            )
+        return found
 
     async def scan(self, /, req: ScanRequest) -> None:
         """Scan for new/updated media files and/or refresh/analyze existing files."""
