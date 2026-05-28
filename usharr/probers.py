@@ -31,13 +31,13 @@ class Prober:
         """Drain the queue forever. Cancel-safe."""
         while True:
             path = await self.queue.get()
+            self.pending.discard(path)
             try:
                 if path.exists():
                     await self.probe(path)
             except Exception as e:
                 logger.exception("%s: %s", path, str(e))
             finally:
-                self.pending.discard(path)
                 self.queue.task_done()
 
     async def probe(self, path: Path) -> None:
