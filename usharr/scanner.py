@@ -56,10 +56,10 @@ class Scanner:
             return
         if req.force_refresh:
             db.delete_mediainfo(req.path)
-            self.mediainfo.enqueue(req.path)
+            self.mediainfo.enqueue(req.path, priority=-time.monotonic())
         if req.force_detect:
             db.delete_ardetector(req.path)
-            self.ardetector.enqueue(req.path)
+            self.ardetector.enqueue(req.path, priority=-time.monotonic())
 
     def start(self) -> None:
         """Spawn every long-lived worker. Call once from lifespan / CLI."""

@@ -16,20 +16,28 @@ class Prober:
     """Long-lived per-pass worker. Subclass and implement ``probe()``."""
 
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[Path] = asyncio.Queue()
+        self.queue: asyncio.PriorityQueue[tuple[float, int, Path]] = (
+            asyncio.PriorityQueue()
+        )
+        self.queue_order = 0
         self.pending: set[Path] = set()
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-    def enqueue(self, path: Path) -> None:
-        if path in self.pending:
+    def enqueue(self, path: Path, *, priority: float = 0) -> None:
+        if path in self.pending and priority >= 0:
             return
         self.pending.add(path)
-        self.queue.put_nowait(path)
+        self.queue.put_nowait((priority, self.queue_order, path))
+        self.queue_order += 1
 
     async def process_queue_forever(self) -> None:
         """Drain the queue forever. Cancel-safe."""
         while True:
-            path = await self.queue.get()
+            _, _, path = await self.queue.get()
+            if path not in self.pending:
+                # path was bumped to front of queue and already probed.
+                self.queue.task_done()
+                continue
             self.pending.discard(path)
             try:
                 if path.exists():
