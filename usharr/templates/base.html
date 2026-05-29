@@ -13,7 +13,7 @@
   }
 })();
 </script>
-<link rel="stylesheet" href="/static/usharr.css">
+<link rel="stylesheet" href="{{ static_url('usharr.css') }}">
 </head>
 <body>
 <nav class="topbar">
@@ -23,6 +23,8 @@
       <li><button data-trigger="/api/task/scan">Scan Library</button></li>
       <li><button data-trigger="/api/task/refresh">Refresh Library</button></li>
       <li><button data-trigger="/api/task/analyze" data-confirm-title="Analyzing the library will take considerable time." data-confirm="Aspect ratio detection takes approximately one minute per library item.">Analyze Library…</button></li>
+      <li class="menu-sep" aria-hidden="true"></li>
+      <li><button id="status-item" disabled>Status…</button></li>
     </ul>
   </div>
   <ul class="tabs">
@@ -45,6 +47,20 @@
     <div class="dialog-actions">
       <button value="cancel">Cancel</button>
       <button value="ok" class="dialog-primary"></button>
+    </div>
+  </form>
+</dialog>
+<dialog id="status-dialog">
+  <form method="dialog">
+    <div autofocus tabindex="-1" aria-hidden="true" class="status-focus-trap"></div>
+    <button class="status-close" value="close" aria-label="Close"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg></button>
+    <div class="status-line" data-kind="ardetect" hidden>
+      <div class="status-main"><span class="status-label">Analyzing</span> <span class="status-path"></span></div>
+      <div class="status-rem"></div>
+    </div>
+    <div class="status-line" data-kind="mediainfo" hidden>
+      <div class="status-main"><span class="status-label">MediaInfo</span> <span class="status-path"></span></div>
+      <div class="status-rem"></div>
     </div>
   </form>
 </dialog>
@@ -162,6 +178,51 @@
       localStorage.setItem('theme', n);
       apply(n);
     });
+  }
+
+  // Probe activity indicator: pulse the brand icon when probes are
+  // running, enable the Status… menu item, and live-update a dialog
+  // that auto-closes when the queues drain. SSE feed keeps everyone in
+  // sync without polling.
+  const brandIcon = document.querySelector('.brand-icon');
+  const statusItem = document.getElementById('status-item');
+  const statusDialog = document.getElementById('status-dialog');
+  const statusLines = {
+    mediainfo: statusDialog && statusDialog.querySelector('[data-kind=mediainfo]'),
+    ardetect: statusDialog && statusDialog.querySelector('[data-kind=ardetect]'),
+  };
+  function basename(p) { return p.split('/').pop(); }
+  function renderStatus(s) {
+    let active = false;
+    for (const kind of ['mediainfo', 'ardetect']) {
+      const line = statusLines[kind];
+      const probing = s[kind].probing;
+      const pending = s[kind].pending;
+      if (probing) {
+        active = true;
+        line.querySelector('.status-path').textContent = basename(probing) + '…';
+        const remaining = pending + 1;
+        line.querySelector('.status-rem').textContent = remaining === 1 ? '1 file remaining' : remaining + ' files remaining';
+        line.hidden = false;
+      } else {
+        line.hidden = true;
+      }
+    }
+    if (brandIcon) brandIcon.classList.toggle('active', active);
+    if (statusItem) statusItem.disabled = !active;
+    if (!active && statusDialog && statusDialog.open) statusDialog.close();
+  }
+  if (statusItem && statusDialog) {
+    statusItem.addEventListener('click', function(e) {
+      e.preventDefault();
+      const m = e.target.closest('.menu-items');
+      if (m) m.setAttribute('hidden', '');
+      if (!statusDialog.open) statusDialog.showModal();
+    });
+    try {
+      const es = new EventSource('/api/status');
+      es.onmessage = (ev) => renderStatus(JSON.parse(ev.data));
+    } catch (err) { /* no SSE support; brand stays idle */ }
   }
 })();
 </script>

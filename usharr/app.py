@@ -1,5 +1,6 @@
 """FastAPI app: endpoints + background scan loop."""
 
+import asyncio
 import dataclasses
 import json
 import logging
@@ -12,12 +13,12 @@ from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from usharr import db, plex
+from usharr import db, plex, probers
 from usharr import format as fmt
 from usharr.config import get_config
 from usharr.scanner import ScanRequest, scanner
@@ -71,6 +72,20 @@ app.mount("/static", StaticFiles(directory=here / "static"), name="static")
 templates = Jinja2Templates(directory=here / "templates")
 templates.env.filters["pathencode"] = lambda s: quote(s or "", safe="/")
 templates.env.globals["resolution_bucket"] = fmt.resolution_bucket
+
+
+def static_url(filename: str) -> str:
+    """Cache-busting URL for a /static asset. Appends the file's mtime
+    so an edit invalidates browser caches without a hard reload."""
+    p = here / "static" / filename
+    try:
+        v = int(p.stat().st_mtime)
+    except OSError:
+        return f"/static/{filename}"
+    return f"/static/{filename}?v={v}"
+
+
+templates.env.globals["static_url"] = static_url
 
 
 def slug(name: str) -> str:
@@ -451,6 +466,45 @@ def build_info(mf: db.MediaFileRow) -> InfoResponse:
         audio=db.get_audio_tracks(path),
         subtitles=db.get_subtitle_tracks(path),
     )
+
+
+def status_snapshot() -> dict:
+    """Live state of both probers, shaped for the topbar status UI."""
+    mi = scanner.mediainfo
+    ar = scanner.ardetector
+    return {
+        "mediainfo": {
+            "probing": str(mi.probing) if mi.probing else None,
+            "pending": len(mi),
+        },
+        "ardetect": {
+            "probing": str(ar.probing) if ar.probing else None,
+            "pending": len(ar),
+        },
+    }
+
+
+@api.get("/status")
+async def status_stream() -> StreamingResponse:
+    """SSE stream of prober activity. One event per state change, plus a
+    15s keepalive so idle proxies don't drop the connection."""
+
+    async def gen() -> AsyncIterator[str]:
+        ev = probers.events.subscribe()
+        try:
+            yield f"data: {json.dumps(status_snapshot())}\n\n"
+            while True:
+                try:
+                    await asyncio.wait_for(ev.wait(), timeout=15.0)
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                ev.clear()
+                yield f"data: {json.dumps(status_snapshot())}\n\n"
+        finally:
+            probers.events.unsubscribe(ev)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.get("/health")

@@ -215,6 +215,36 @@ code {
 }
 .menu-items[hidden] { display: none; }
 .menu-left .menu-items { left: 0; right: auto; }
+.menu-items button:disabled,
+.menu-items button:disabled:hover {
+  opacity: 0.5;
+  background: transparent;
+  color: var(--fg);
+  cursor: default;
+}
+.menu-items .menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+  list-style: none;
+}
+
+/* Spinning ring (Plex-style) around the brand icon while any prober
+ * is running. Three borders colored, one transparent → 3/4 arc; CSS
+ * rotation spins it. */
+.brand-icon { position: relative; }
+.brand-icon.active::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 2px solid transparent;
+  border-top-color: #E6A10B;
+  border-right-color: #E6A10B;
+  border-bottom-color: #E6A10B;
+  border-radius: 50%;
+  animation: brand-spin 1.2s linear infinite;
+}
+@keyframes brand-spin { to { transform: rotate(360deg); } }
 
 #confirm-dialog {
   background: var(--bg);
@@ -238,6 +268,64 @@ code {
   font: inherit;
   cursor: pointer;
 }
+
+#status-dialog {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 36px 20px 16px;
+  width: min(560px, calc(100vw - 32px));
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+#status-dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+/* Invisible focus sink. Receives the modal's initial autofocus so the
+ * close X doesn't open ringed. tabindex=-1 keeps it out of tab order. */
+#status-dialog .status-focus-trap {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+/* Finder-style top-left close affordance. The dialog itself is modal,
+ * so Esc already closes — this is the click target. Browser default
+ * focus ring is fine (only shown on keyboard nav now that the focus
+ * trap absorbs the initial autofocus). */
+#status-dialog .status-close {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  padding: 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#status-dialog .status-close:hover { color: var(--fg); background: var(--bg-row-hover); }
+#status-dialog .status-close svg { display: block; }
+/* Reserve enough vertical space per prober that a 3-line title + the
+ * remaining-count row never grow the dialog (5lh covers both with a
+ * margin for the smaller-font remaining row). Content sits at top;
+ * unused space falls below, separating the two probers. */
+#status-dialog .status-line { min-height: 5lh; }
+/* Higher specificity than the UA [hidden] {display:none} so block
+ * layout doesn't shadow the hide-when-idle attribute. */
+#status-dialog .status-line[hidden] { display: none; }
+#status-dialog .status-main {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+#status-dialog .status-path { opacity: 0.7; }
+#status-dialog .status-rem { color: var(--fg-dim); padding-top: 2px; font-size: 0.92em; }
+#status-dialog .status-rem:empty { display: none; }
 main {
   /* No top padding: the sticky h1 (library) / detail-nav would leave
    * a 16px gap between themselves and the topbar, and tbody rows

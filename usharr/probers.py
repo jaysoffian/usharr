@@ -12,6 +12,31 @@ from pathlib import Path
 from usharr import ardetector, db, mediainfo
 
 
+class ProberEvents:
+    """Fan-out notifier for prober state changes. Each subscriber gets
+    its own asyncio.Event; ``notify()`` sets them all. Subscribers wait,
+    clear, then re-read live state from the prober singletons. Repeated
+    ``notify()`` between waits collapses to a single wake-up."""
+
+    def __init__(self) -> None:
+        self.subscribers: set[asyncio.Event] = set()
+
+    def subscribe(self) -> asyncio.Event:
+        ev = asyncio.Event()
+        self.subscribers.add(ev)
+        return ev
+
+    def unsubscribe(self, ev: asyncio.Event) -> None:
+        self.subscribers.discard(ev)
+
+    def notify(self) -> None:
+        for ev in self.subscribers:
+            ev.set()
+
+
+events = ProberEvents()
+
+
 class Prober:
     """Long-lived per-pass worker. Subclass and implement ``probe()``."""
 
@@ -21,6 +46,7 @@ class Prober:
         )
         self.queue_order = 0
         self.pending: set[Path] = set()
+        self.probing: Path | None = None
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def __len__(self) -> int:
@@ -32,6 +58,7 @@ class Prober:
         self.pending.add(path)
         self.queue.put_nowait((priority, self.queue_order, path))
         self.queue_order += 1
+        events.notify()
 
     async def process_queue_forever(self) -> None:
         """Drain the queue forever. Cancel-safe."""
@@ -43,12 +70,17 @@ class Prober:
                 continue
             self.pending.discard(path)
             try:
-                if path.exists():
-                    self.logger.info("probe %s (pending %d)", path, len(self))
-                    await self.probe(path)
+                if not path.exists():
+                    continue
+                self.probing = path
+                events.notify()
+                self.logger.info("probing %s (pending %d)", path, len(self))
+                await self.probe(path)
             except Exception as e:
                 self.logger.exception("%s: %s", path, str(e))
             finally:
+                self.probing = None
+                events.notify()
                 self.queue.task_done()
 
     async def probe(self, path: Path) -> None:
