@@ -23,6 +23,9 @@ class Prober:
         self.pending: set[Path] = set()
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
+    def __len__(self) -> int:
+        return len(self.pending)
+
     def enqueue(self, path: Path, *, priority: float = 0) -> None:
         if path in self.pending and priority >= 0:
             return
@@ -41,7 +44,7 @@ class Prober:
             self.pending.discard(path)
             try:
                 if path.exists():
-                    self.logger.info("probe %s (qsize %d)", path, self.queue.qsize())
+                    self.logger.info("probe %s (pending %d)", path, len(self))
                     await self.probe(path)
             except Exception as e:
                 self.logger.exception("%s: %s", path, str(e))
