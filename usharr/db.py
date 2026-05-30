@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS subtitle_track (
     is_default INTEGER NOT NULL DEFAULT 0,
     is_forced  INTEGER NOT NULL DEFAULT 0,
     is_sdh     INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (path, idx)
+    PRIMARY KEY (path, source, idx)
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS kv (
@@ -323,6 +323,7 @@ def init_db() -> None:
     maybe_drop_discovered_at()
     maybe_drop_timestamp_columns()
     maybe_add_ardetector_color_pct()
+    maybe_widen_subtitle_pk()
     maybe_reprobe_on_schema_bump()
     logger.info("Opened DB at %s", DB_PATH)
 
@@ -384,6 +385,50 @@ def maybe_rename_subtitles_column() -> None:
         "ALTER TABLE media_file RENAME COLUMN sidecars_mtime_ns TO subtitles_mtime_ns"
     )
     logger.info("Renamed media_file.sidecars_mtime_ns to subtitles_mtime_ns")
+
+
+def maybe_widen_subtitle_pk() -> None:
+    """One-shot rebuild of subtitle_track to widen its PK from (path, idx)
+    to (path, source, idx). Internal and external tracks both number idx
+    from 0, so the old key collided once a file had both at the same idx.
+    The existing rows are copied over intact — the old (path, idx) PK
+    guarantees idx is unique per path, so they can't collide under the new
+    key. No-op on fresh and already-migrated DBs.
+    """
+    conn = get_conn()
+    info = conn.execute("PRAGMA table_info(subtitle_track)").fetchall()
+    # PRAGMA row: (cid, name, type, notnull, dflt_value, pk); pk > 0 means
+    # the column is part of the primary key.
+    if any(r[1] == "source" and r[5] for r in info):
+        return
+    cols = ", ".join(("path", *SUBTITLE_COLS))
+    conn.execute("BEGIN")
+    try:
+        conn.execute("ALTER TABLE subtitle_track RENAME TO subtitle_track_old")
+        conn.execute(
+            "CREATE TABLE subtitle_track ("
+            " path TEXT NOT NULL REFERENCES media_file(path) ON DELETE CASCADE,"
+            " idx INTEGER NOT NULL,"
+            " source TEXT NOT NULL,"
+            " file_path TEXT,"
+            " codec TEXT,"
+            " language TEXT,"
+            " title TEXT,"
+            " is_default INTEGER NOT NULL DEFAULT 0,"
+            " is_forced INTEGER NOT NULL DEFAULT 0,"
+            " is_sdh INTEGER NOT NULL DEFAULT 0,"
+            " PRIMARY KEY (path, source, idx)"
+            ") WITHOUT ROWID"
+        )
+        conn.execute(
+            f"INSERT INTO subtitle_track ({cols}) SELECT {cols} FROM subtitle_track_old"
+        )
+        conn.execute("DROP TABLE subtitle_track_old")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    logger.info("Widened subtitle_track PK to (path, source, idx)")
 
 
 def maybe_reprobe_on_schema_bump() -> None:
