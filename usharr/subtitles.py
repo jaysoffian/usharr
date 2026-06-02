@@ -1,6 +1,7 @@
 """External subtitle file detection + filename parsing."""
 
 import logging
+import re
 from pathlib import Path
 
 from usharr import db
@@ -9,13 +10,12 @@ from usharr.langs import norm_lang
 
 logger = logging.getLogger(__name__)
 
-SUBTITLE_EXTENSIONS = frozenset({".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt"})
+SUBTITLE_EXTENSIONS = frozenset({".srt", ".ass", ".ssa", ".idx", ".vtt"})
 
 CODEC_BY_EXT = {
     ".srt": "SRT",
     ".ass": "ASS",
     ".ssa": "SSA",
-    ".sub": "VobSub",
     ".idx": "VobSub",
     ".vtt": "WebVTT",
 }
@@ -24,9 +24,16 @@ CODEC_BY_EXT = {
 FORCED_TOKENS = {"forced"}
 SDH_TOKENS = {"sdh", "hi", "cc"}
 
+# A VobSub `.idx` lists each stream as `id: <lang>, index: <n>`.
+VOBSUB_ID_RE = re.compile(r"^id:\s*([A-Za-z]{2,3}),\s*index:\s*(\d+)", re.MULTILINE)
 
-def find_subtitles(video_path: Path) -> list[Path]:
-    """Return external subtitle files sharing the video's stem."""
+
+def find_subtitle_files(video_path: Path) -> list[Path]:
+    """Return external subtitle sidecar files sharing the video's stem.
+
+    A VobSub ``.idx`` is included only when its companion ``.sub`` exists
+    (the ``.idx`` alone is useless); the ``.sub`` itself is never returned.
+    """
     stem = video_path.stem
     parent = video_path.parent
     out: list[Path] = []
@@ -34,11 +41,14 @@ def find_subtitles(video_path: Path) -> list[Path]:
         for p in parent.iterdir():
             if not p.is_file():
                 continue
-            if p.suffix.lower() not in SUBTITLE_EXTENSIONS:
+            suffix = p.suffix.lower()
+            if suffix not in SUBTITLE_EXTENSIONS:
                 continue
             if not p.name.startswith(stem):
                 continue
             if p.name == video_path.name:
+                continue
+            if suffix == ".idx" and not p.with_suffix(".sub").exists():
                 continue
             out.append(p)
     except OSError as exc:
@@ -47,24 +57,8 @@ def find_subtitles(video_path: Path) -> list[Path]:
     return out
 
 
-def mtime_ns_max(paths: list[Path]) -> int | None:
-    """Max mtime_ns across paths, or None if paths is empty / all stat fail."""
-    best: int | None = None
-    for p in paths:
-        try:
-            m = p.stat().st_mtime_ns
-        except OSError:
-            continue
-        if best is None or m > best:
-            best = m
-    return best
-
-
-def parse_subtitle(video_stem: str, path: Path, idx: int) -> SubtitleTrackRow:
-    """Produce a subtitle_track row for an external subtitle file."""
-    suffix = path.suffix.lower()
-    codec = CODEC_BY_EXT.get(suffix, suffix.lstrip(".").upper())
-
+def parse_text_sub(video_stem: str, path: Path, codec: str | None) -> SubtitleTrackRow:
+    """Produce a subtitle_track row from a sidecar's filename tokens."""
     tail = path.name.removeprefix(video_stem)
     tail = tail.removesuffix(path.suffix)
     tail = tail.removeprefix(".")
@@ -86,9 +80,8 @@ def parse_subtitle(video_stem: str, path: Path, idx: int) -> SubtitleTrackRow:
             if maybe is not None:
                 lang = maybe
     return SubtitleTrackRow(
-        idx=idx,
-        source="external",
-        file_path=str(path),
+        idx=0,
+        subtitle_path=str(path),
         codec=codec,
         language=lang,
         title=None,
@@ -98,7 +91,76 @@ def parse_subtitle(video_stem: str, path: Path, idx: int) -> SubtitleTrackRow:
     )
 
 
-def update_external_subs(path: Path, subtitle_paths: list[Path]) -> None:
-    """Replace external sub rows for `path` from the current on-disk files."""
-    rows = [parse_subtitle(path.stem, s, i) for i, s in enumerate(subtitle_paths)]
-    db.update_external_subtitles(path=path, subtitles=rows)
+def parse_vobsub_idx(video_stem: str, path: Path) -> list[SubtitleTrackRow]:
+    """Produce one row per stream listed in a VobSub ``.idx`` file.
+
+    Falls back to a single filename-derived row when the file can't be
+    read or lists no streams.
+    """
+    try:
+        text = path.read_text(errors="replace")
+    except OSError as exc:
+        logger.debug("read failed for %s: %s", path, exc)
+        text = ""
+    # A real-world .idx may list several languages at the same index; that's
+    # one stream, and (subtitle_path, idx) is the external key, so keep only
+    # the first row per distinct index.
+    rows: list[SubtitleTrackRow] = []
+    seen: set[int] = set()
+    for code, index in VOBSUB_ID_RE.findall(text):
+        idx = int(index)
+        if idx in seen:
+            continue
+        seen.add(idx)
+        rows.append(
+            SubtitleTrackRow(
+                idx=idx,
+                subtitle_path=str(path),
+                codec="VobSub",
+                language=norm_lang(code),
+                title=None,
+                is_default=False,
+                is_forced=False,
+                is_sdh=False,
+            )
+        )
+    if rows:
+        return rows
+    return [parse_text_sub(video_stem, path, "VobSub")]
+
+
+def parse_subtitle_file(video_stem: str, path: Path) -> list[SubtitleTrackRow]:
+    """Parse a sidecar into one or more subtitle_track rows."""
+    suffix = path.suffix.lower()
+    if suffix == ".idx":
+        return parse_vobsub_idx(video_stem, path)
+    codec = CODEC_BY_EXT.get(suffix, suffix.lstrip(".").upper())
+    return [parse_text_sub(video_stem, path, codec)]
+
+
+def sync_external_subs(video_path: Path, files: list[Path]) -> None:
+    """Reconcile a video's external subtitle rows with its on-disk sidecars.
+
+    Cheap when nothing changed: stats the files and compares against the
+    recorded (size, mtime) set, only re-parsing on a diff.
+    """
+    disk: dict[str, tuple[int, int]] = {}
+    for p in files:
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        disk[str(p)] = (st.st_size, st.st_mtime_ns)
+
+    existing = db.subtitle_files_for(video_path)
+    if disk == existing:
+        return
+
+    payload: list[tuple[str, int, int, list[SubtitleTrackRow]]] = []
+    for p in files:
+        key = str(p)
+        if key not in disk:
+            continue
+        size, mtime = disk[key]
+        payload.append((key, size, mtime, parse_subtitle_file(video_path.stem, p)))
+    db.replace_external_subtitles(video_path=video_path, files=payload)

@@ -1,13 +1,13 @@
 """SQLite-backed store: media files, tracks, Plex items, and kv.
 
-Read accessors return frozen-slots dataclasses (``MediaFileRow``,
+Read accessors return frozen-slots dataclasses (``VideoFileRow``,
 ``MediainfoRow``, ``ArdetectorRow``, ``AudioTrackRow``,
 ``SubtitleTrackRow``, ``PlexItemRow``, ``LibraryRow``).
 View-layer code that needs to add template fields should
 ``dataclasses.asdict(row)`` first and work in dict-space from there.
 
 Schema overview:
-  * ``media_file`` is the discovery row — path/size/mtime/subtitles.
+  * ``video_file`` is the discovery row — path/size/mtime.
     A row exists iff we've seen the file on disk.
   * ``mediainfo`` holds the cheap track-metadata pass (container,
     video_*, duration). Row presence ⇒ at least one attempt; ``error``
@@ -35,16 +35,40 @@ DB_DIR = DB_PATH.parent
 db: sqlite3.Connection | None = None
 
 
-CREATE_TABLES = """
-CREATE TABLE IF NOT EXISTS media_file (
+# Shared so CREATE_TABLES (fresh DB) and the migration rebuild can't diverge.
+CREATE_SUBTITLE_TRACK = """
+CREATE TABLE IF NOT EXISTS subtitle_track (
+    video_path    TEXT NOT NULL REFERENCES video_file(path) ON DELETE CASCADE,
+    subtitle_path TEXT REFERENCES subtitle_file(path) ON DELETE CASCADE,
+    idx           INTEGER NOT NULL,
+    codec         TEXT,
+    language      TEXT,
+    title         TEXT,
+    is_default    INTEGER NOT NULL DEFAULT 0,
+    is_forced     INTEGER NOT NULL DEFAULT 0,
+    is_sdh        INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+CREATE_TABLES = (
+    """
+CREATE TABLE IF NOT EXISTS video_file (
     path              TEXT PRIMARY KEY,
     size_bytes        INTEGER NOT NULL,
-    mtime_ns          INTEGER NOT NULL,
-    subtitles_mtime_ns INTEGER
+    mtime_ns          INTEGER NOT NULL
 ) WITHOUT ROWID;
 
+CREATE TABLE IF NOT EXISTS subtitle_file (
+    path       TEXT PRIMARY KEY,
+    video_path TEXT NOT NULL REFERENCES video_file(path) ON DELETE CASCADE,
+    size_bytes INTEGER NOT NULL,
+    mtime_ns   INTEGER NOT NULL
+) WITHOUT ROWID;
+"""
+    + CREATE_SUBTITLE_TRACK
+    + """
 CREATE TABLE IF NOT EXISTS mediainfo (
-    path               TEXT PRIMARY KEY REFERENCES media_file(path) ON DELETE CASCADE,
+    path               TEXT PRIMARY KEY REFERENCES video_file(path) ON DELETE CASCADE,
     error              TEXT,
     container          TEXT,
     duration           REAL,
@@ -61,7 +85,7 @@ CREATE TABLE IF NOT EXISTS mediainfo (
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS ardetector (
-    path           TEXT PRIMARY KEY REFERENCES media_file(path) ON DELETE CASCADE,
+    path           TEXT PRIMARY KEY REFERENCES video_file(path) ON DELETE CASCADE,
     error          TEXT,
     aspect_primary REAL,
     aspect_widest  REAL,
@@ -70,7 +94,7 @@ CREATE TABLE IF NOT EXISTS ardetector (
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS audio_track (
-    path             TEXT NOT NULL REFERENCES media_file(path) ON DELETE CASCADE,
+    path             TEXT NOT NULL REFERENCES video_file(path) ON DELETE CASCADE,
     idx              INTEGER NOT NULL,
     codec            TEXT,
     channels         INTEGER,
@@ -87,20 +111,6 @@ CREATE TABLE IF NOT EXISTS audio_track (
     bit_depth        INTEGER,
     compression_mode TEXT,
     PRIMARY KEY (path, idx)
-) WITHOUT ROWID;
-
-CREATE TABLE IF NOT EXISTS subtitle_track (
-    path       TEXT NOT NULL REFERENCES media_file(path) ON DELETE CASCADE,
-    idx        INTEGER NOT NULL,
-    source     TEXT NOT NULL,
-    file_path  TEXT,
-    codec      TEXT,
-    language   TEXT,
-    title      TEXT,
-    is_default INTEGER NOT NULL DEFAULT 0,
-    is_forced  INTEGER NOT NULL DEFAULT 0,
-    is_sdh     INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (path, source, idx)
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS kv (
@@ -141,8 +151,13 @@ CREATE TABLE IF NOT EXISTS sonarr_series (
     local_folder TEXT                 -- remote series folder mapped via path_map
 ) WITHOUT ROWID;
 """
+)
 
 CREATE_INDEXES = """
+CREATE UNIQUE INDEX IF NOT EXISTS subtitle_track_internal ON subtitle_track(video_path, idx)    WHERE subtitle_path IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS subtitle_track_external ON subtitle_track(subtitle_path, idx) WHERE subtitle_path IS NOT NULL;
+CREATE INDEX        IF NOT EXISTS subtitle_track_video_path ON subtitle_track(video_path);
+CREATE INDEX        IF NOT EXISTS subtitle_file_video_path  ON subtitle_file(video_path);
 CREATE INDEX IF NOT EXISTS plex_item_local_path       ON plex_item(local_path);
 CREATE INDEX IF NOT EXISTS plex_item_type             ON plex_item(type);
 CREATE INDEX IF NOT EXISTS bazarr_movie_local_path    ON bazarr_movie(local_path);
@@ -162,11 +177,10 @@ MEDIAINFO_SCHEMA_VERSION = 7
 
 
 @dataclass(frozen=True, slots=True)
-class MediaFileRow:
+class VideoFileRow:
     path: str
     size_bytes: int
     mtime_ns: int
-    subtitles_mtime_ns: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,8 +233,7 @@ class AudioTrackRow:
 @dataclass(frozen=True, slots=True)
 class SubtitleTrackRow:
     idx: int
-    source: str
-    file_path: str | None
+    subtitle_path: str | None
     codec: str | None
     language: str | None
     title: str | None
@@ -243,11 +256,10 @@ class PlexItemRow:
 
 @dataclass(frozen=True, slots=True)
 class LibraryRow:
-    # media_file fields (mirrors MediaFileRow)
+    # video_file fields (mirrors VideoFileRow)
     path: str
     size_bytes: int
     mtime_ns: int
-    subtitles_mtime_ns: int | None
     # mediainfo fields (NULL when no mediainfo row yet — i.e. stub).
     mediainfo_error: str | None
     container: str | None
@@ -317,25 +329,35 @@ def init_db() -> None:
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute("PRAGMA foreign_keys=ON")
+    # PRE-schema migrations: must run before CREATE_TABLES so the
+    # IF NOT EXISTS statements don't shadow the tables being migrated.
+    maybe_rename_media_file_to_video_file()
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS subtitle_file ("
+        " path TEXT PRIMARY KEY,"
+        " video_path TEXT NOT NULL REFERENCES video_file(path) ON DELETE CASCADE,"
+        " size_bytes INTEGER NOT NULL,"
+        " mtime_ns INTEGER NOT NULL"
+        ") WITHOUT ROWID"
+    )
+    maybe_rebuild_subtitle_track()
     db.executescript(CREATE_TABLES)
     db.executescript(CREATE_INDEXES)
-    maybe_rename_subtitles_column()
     maybe_drop_discovered_at()
     maybe_drop_timestamp_columns()
     maybe_add_ardetector_color_pct()
-    maybe_widen_subtitle_pk()
     maybe_reprobe_on_schema_bump()
     logger.info("Opened DB at %s", DB_PATH)
 
 
 def maybe_drop_discovered_at() -> None:
-    """One-shot drop of media_file.discovered_at. No-op on fresh DBs."""
+    """One-shot drop of video_file.discovered_at. No-op on fresh DBs."""
     conn = get_conn()
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(media_file)").fetchall()}
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(video_file)").fetchall()}
     if "discovered_at" not in cols:
         return
-    conn.execute("ALTER TABLE media_file DROP COLUMN discovered_at")
-    logger.info("Dropped media_file.discovered_at")
+    conn.execute("ALTER TABLE video_file DROP COLUMN discovered_at")
+    logger.info("Dropped video_file.discovered_at")
 
 
 def maybe_drop_timestamp_columns() -> None:
@@ -371,64 +393,61 @@ def maybe_add_ardetector_color_pct() -> None:
     logger.info("Added ardetector.color_pct")
 
 
-def maybe_rename_subtitles_column() -> None:
-    """One-shot rename of media_file.sidecars_mtime_ns -> subtitles_mtime_ns.
-
-    No-op on fresh DBs (CREATE TABLE already used the new name) and on
-    DBs that have already been migrated.
+def maybe_rename_media_file_to_video_file() -> None:
+    """PRE-schema: rename media_file -> video_file and drop the obsolete
+    subtitles_mtime_ns column. SQLite auto-rewrites the child FK references
+    on rename (legacy_alter_table is off by default). No-op on fresh DBs
+    (no media_file) and on already-migrated DBs (video_file exists).
     """
     conn = get_conn()
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(media_file)").fetchall()}
-    if "sidecars_mtime_ns" not in cols:
+    tables = {
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if "video_file" in tables or "media_file" not in tables:
         return
-    conn.execute(
-        "ALTER TABLE media_file RENAME COLUMN sidecars_mtime_ns TO subtitles_mtime_ns"
-    )
-    logger.info("Renamed media_file.sidecars_mtime_ns to subtitles_mtime_ns")
+    conn.execute("ALTER TABLE media_file RENAME TO video_file")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(video_file)").fetchall()}
+    if "subtitles_mtime_ns" in cols:
+        conn.execute("ALTER TABLE video_file DROP COLUMN subtitles_mtime_ns")
+    logger.info("Renamed media_file to video_file and dropped subtitles_mtime_ns")
 
 
-def maybe_widen_subtitle_pk() -> None:
-    """One-shot rebuild of subtitle_track to widen its PK from (path, idx)
-    to (path, source, idx). Internal and external tracks both number idx
-    from 0, so the old key collided once a file had both at the same idx.
-    The existing rows are copied over intact — the old (path, idx) PK
-    guarantees idx is unique per path, so they can't collide under the new
-    key. No-op on fresh and already-migrated DBs.
+def maybe_rebuild_subtitle_track() -> None:
+    """PRE-schema: rebuild the old (path, source, idx) subtitle_track into
+    the new (video_path, subtitle_path, idx) shape. Migrates only internal
+    rows (subtitle_path NULL); external rows are dropped and rebuilt from
+    disk on the next scan. No-op on fresh DBs (no table) and on
+    already-migrated DBs (no `source` column).
     """
     conn = get_conn()
-    info = conn.execute("PRAGMA table_info(subtitle_track)").fetchall()
-    # PRAGMA row: (cid, name, type, notnull, dflt_value, pk); pk > 0 means
-    # the column is part of the primary key.
-    if any(r[1] == "source" and r[5] for r in info):
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(subtitle_track)").fetchall()}
+    if not cols:
         return
-    cols = ", ".join(("path", *SUBTITLE_COLS))
+    if "source" not in cols:
+        return
+    conn.execute("PRAGMA foreign_keys=OFF")
     conn.execute("BEGIN")
     try:
         conn.execute("ALTER TABLE subtitle_track RENAME TO subtitle_track_old")
+        conn.execute(CREATE_SUBTITLE_TRACK)
         conn.execute(
-            "CREATE TABLE subtitle_track ("
-            " path TEXT NOT NULL REFERENCES media_file(path) ON DELETE CASCADE,"
-            " idx INTEGER NOT NULL,"
-            " source TEXT NOT NULL,"
-            " file_path TEXT,"
-            " codec TEXT,"
-            " language TEXT,"
-            " title TEXT,"
-            " is_default INTEGER NOT NULL DEFAULT 0,"
-            " is_forced INTEGER NOT NULL DEFAULT 0,"
-            " is_sdh INTEGER NOT NULL DEFAULT 0,"
-            " PRIMARY KEY (path, source, idx)"
-            ") WITHOUT ROWID"
-        )
-        conn.execute(
-            f"INSERT INTO subtitle_track ({cols}) SELECT {cols} FROM subtitle_track_old"
+            "INSERT INTO subtitle_track"
+            " (video_path, subtitle_path, idx, codec, language, title,"
+            "  is_default, is_forced, is_sdh)"
+            " SELECT path, NULL, idx, codec, language, title,"
+            "  is_default, is_forced, is_sdh"
+            " FROM subtitle_track_old WHERE source = 'internal'"
         )
         conn.execute("DROP TABLE subtitle_track_old")
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
-    logger.info("Widened subtitle_track PK to (path, source, idx)")
+    conn.execute("PRAGMA foreign_keys=ON")
+    logger.info("Rebuilt subtitle_track keyed by (video_path, subtitle_path, idx)")
 
 
 def maybe_reprobe_on_schema_bump() -> None:
@@ -490,7 +509,7 @@ def map_remote_path(remote: str, path_map: dict[str, str]) -> str:
 def file_exists(p: str) -> bool:
     return (
         get_conn()
-        .execute("SELECT 1 FROM media_file WHERE path = ? LIMIT 1", (p,))
+        .execute("SELECT 1 FROM video_file WHERE path = ? LIMIT 1", (p,))
         .fetchone()
         is not None
     )
@@ -501,7 +520,7 @@ def folder_has_files(p: str) -> bool:
     return (
         get_conn()
         .execute(
-            "SELECT 1 FROM media_file WHERE path LIKE ? ESCAPE '\\' LIMIT 1",
+            "SELECT 1 FROM video_file WHERE path LIKE ? ESCAPE '\\' LIMIT 1",
             (like,),
         )
         .fetchone()
@@ -510,7 +529,7 @@ def folder_has_files(p: str) -> bool:
 
 
 def resolve_local_file(remote_path: str | None, path_map: dict[str, str]) -> str | None:
-    """Map a remote file path to local; None if it doesn't match a media_file row."""
+    """Map a remote file path to local; None if it doesn't match a video_file row."""
     if not remote_path:
         return None
     mapped = map_remote_path(remote_path, path_map)
@@ -520,57 +539,54 @@ def resolve_local_file(remote_path: str | None, path_map: dict[str, str]) -> str
 def resolve_local_folder(
     remote_path: str | None, path_map: dict[str, str]
 ) -> str | None:
-    """Map a remote folder path to local; None if no media_file row sits under it."""
+    """Map a remote folder path to local; None if no video_file row sits under it."""
     if not remote_path:
         return None
     mapped = map_remote_path(remote_path, path_map)
     return mapped if folder_has_files(mapped) else None
 
 
-# --- media_file -----------------------------------------------------------
+# --- video_file -----------------------------------------------------------
 
-MEDIA_COLS = (
+VIDEO_COLS = (
     "path",
     "size_bytes",
     "mtime_ns",
-    "subtitles_mtime_ns",
 )
 
 
-def get(path: Path | str) -> MediaFileRow | None:
-    cols = ", ".join(MEDIA_COLS)
+def get(path: Path | str) -> VideoFileRow | None:
+    cols = ", ".join(VIDEO_COLS)
     row = (
         get_conn()
-        .execute(f"SELECT {cols} FROM media_file WHERE path = ?", (str(path),))
+        .execute(f"SELECT {cols} FROM video_file WHERE path = ?", (str(path),))
         .fetchone()
     )
     if row is None:
         return None
-    return make_row(MediaFileRow, MEDIA_COLS, row)
+    return make_row(VideoFileRow, VIDEO_COLS, row)
 
 
-def get_by_remote_path(remote: str, path_map: dict[str, str]) -> MediaFileRow | None:
-    """Map a remote path to local and return the matching media_file row."""
+def get_by_remote_path(remote: str, path_map: dict[str, str]) -> VideoFileRow | None:
+    """Map a remote path to local and return the matching video_file row."""
     return get(map_remote_path(remote, path_map))
 
 
-def upsert_media_file(
+def upsert_video_file(
     *,
     path: Path,
     size_bytes: int,
     mtime_ns: int,
-    subtitles_mtime_ns: int | None,
 ) -> None:
-    """Insert a media_file row, or refresh stat fields if it already exists."""
+    """Insert a video_file row, or refresh stat fields if it already exists."""
     get_conn().execute(
-        "INSERT INTO media_file"
-        " (path, size_bytes, mtime_ns, subtitles_mtime_ns)"
-        " VALUES (?, ?, ?, ?)"
+        "INSERT INTO video_file"
+        " (path, size_bytes, mtime_ns)"
+        " VALUES (?, ?, ?)"
         " ON CONFLICT(path) DO UPDATE SET"
         " size_bytes = excluded.size_bytes,"
-        " mtime_ns = excluded.mtime_ns,"
-        " subtitles_mtime_ns = excluded.subtitles_mtime_ns",
-        (str(path), size_bytes, mtime_ns, subtitles_mtime_ns),
+        " mtime_ns = excluded.mtime_ns",
+        (str(path), size_bytes, mtime_ns),
     )
 
 
@@ -614,7 +630,7 @@ def upsert_mediainfo(
 ) -> None:
     """Upsert the mediainfo row and replace the file's audio + internal
     subtitle tracks. External subtitles aren't touched (they live or die
-    with the subtitle files — see ``update_external_subtitles``).
+    with the subtitle files — see ``replace_external_subtitles``).
     """
     path_str = row.path
     placeholders = ", ".join("?" * len(MEDIAINFO_COLS))
@@ -656,20 +672,19 @@ def upsert_mediainfo(
                 ),
             )
         conn.execute(
-            "DELETE FROM subtitle_track WHERE path = ? AND source = 'internal'",
+            "DELETE FROM subtitle_track WHERE video_path = ? AND subtitle_path IS NULL",
             (path_str,),
         )
         for t in internal_subs:
             conn.execute(
                 "INSERT INTO subtitle_track"
-                " (path, idx, source, file_path, codec, language, title,"
+                " (video_path, subtitle_path, idx, codec, language, title,"
                 "  is_default, is_forced, is_sdh)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     path_str,
+                    t.subtitle_path,
                     t.idx,
-                    "internal",
-                    t.file_path,
                     t.codec,
                     t.language,
                     t.title,
@@ -769,8 +784,7 @@ AUDIO_BOOLS = ("is_default", "is_forced")
 
 SUBTITLE_COLS = (
     "idx",
-    "source",
-    "file_path",
+    "subtitle_path",
     "codec",
     "language",
     "title",
@@ -797,13 +811,13 @@ def get_audio_tracks(path: str) -> list[AudioTrackRow]:
 
 
 def get_subtitle_tracks(path: str) -> list[SubtitleTrackRow]:
-    """Internal subs (by their own idx) first, then externals (by idx)."""
+    """Internal subs (by their own idx) first, then externals (by file/idx)."""
     cols = ", ".join(SUBTITLE_COLS)
     rows = (
         get_conn()
         .execute(
-            f"SELECT {cols} FROM subtitle_track WHERE path = ?"
-            " ORDER BY source = 'external', idx",
+            f"SELECT {cols} FROM subtitle_track WHERE video_path = ?"
+            " ORDER BY subtitle_path IS NOT NULL, subtitle_path, idx",
             (path,),
         )
         .fetchall()
@@ -814,44 +828,59 @@ def get_subtitle_tracks(path: str) -> list[SubtitleTrackRow]:
     ]
 
 
-def update_external_subtitles(
-    *,
-    path: Path,
-    subtitles: Iterable[SubtitleTrackRow],
-) -> None:
-    """Replace only the external subtitle_track rows.
+def subtitle_files_for(video_path: Path | str) -> dict[str, tuple[int, int]]:
+    """Return {subtitle_path: (size_bytes, mtime_ns)} for a video's sidecars."""
+    rows = (
+        get_conn()
+        .execute(
+            "SELECT path, size_bytes, mtime_ns FROM subtitle_file WHERE video_path = ?",
+            (str(video_path),),
+        )
+        .fetchall()
+    )
+    return {r[0]: (r[1], r[2]) for r in rows}
 
-    Caller is responsible for keeping ``media_file.subtitles_mtime_ns``
-    in sync via ``upsert_media_file`` — discovery state lives on the
-    discovery row.
+
+def replace_external_subtitles(
+    *,
+    video_path: Path,
+    files: Iterable[tuple[str, int, int, list[SubtitleTrackRow]]],
+) -> None:
+    """Replace every external sidecar (and its tracks) for one video.
+
+    Deleting the subtitle_file rows cascades the external subtitle_track
+    rows via the subtitle_path FK; internal rows (NULL subtitle_path) are
+    untouched.
     """
-    path_str = str(path)
+    video_str = str(video_path)
     conn = get_conn()
     conn.execute("BEGIN")
     try:
-        conn.execute(
-            "DELETE FROM subtitle_track WHERE path = ? AND source = 'external'",
-            (path_str,),
-        )
-        for t in subtitles:
+        conn.execute("DELETE FROM subtitle_file WHERE video_path = ?", (video_str,))
+        for sub_path, size_bytes, mtime_ns, tracks in files:
             conn.execute(
-                "INSERT INTO subtitle_track"
-                " (path, idx, source, file_path, codec, language, title,"
-                "  is_default, is_forced, is_sdh)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (
-                    path_str,
-                    t.idx,
-                    "external",
-                    t.file_path,
-                    t.codec,
-                    t.language,
-                    t.title,
-                    1 if t.is_default else 0,
-                    1 if t.is_forced else 0,
-                    1 if t.is_sdh else 0,
-                ),
+                "INSERT INTO subtitle_file (path, video_path, size_bytes, mtime_ns)"
+                " VALUES (?, ?, ?, ?)",
+                (sub_path, video_str, size_bytes, mtime_ns),
             )
+            for t in tracks:
+                conn.execute(
+                    "INSERT INTO subtitle_track"
+                    " (video_path, subtitle_path, idx, codec, language, title,"
+                    "  is_default, is_forced, is_sdh)"
+                    " VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        video_str,
+                        sub_path,
+                        t.idx,
+                        t.codec,
+                        t.language,
+                        t.title,
+                        1 if t.is_default else 0,
+                        1 if t.is_forced else 0,
+                        1 if t.is_sdh else 0,
+                    ),
+                )
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
@@ -859,11 +888,11 @@ def update_external_subtitles(
 
 
 def list_paths() -> set[str]:
-    return {row[0] for row in get_conn().execute("SELECT path FROM media_file")}
+    return {row[0] for row in get_conn().execute("SELECT path FROM video_file")}
 
 
 def library_rows(path_prefix: str) -> list[LibraryRow]:
-    """media_file LEFT JOIN mediainfo / ardetector / plex_item.
+    """video_file LEFT JOIN mediainfo / ardetector / plex_item.
 
     A NULL `mediainfo_error` (and the associated columns) means the file
     is a stub — discovered but not yet probed for track metadata. Same
@@ -871,7 +900,7 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
     here; fetch via ``get_audio_tracks(path)`` /
     ``get_subtitle_tracks(path)`` as needed.
     """
-    media_cols = ", ".join(f"m.{c}" for c in MEDIA_COLS)
+    media_cols = ", ".join(f"m.{c}" for c in VIDEO_COLS)
     # mediainfo: skip the duplicate `path` column; alias `error` so it
     # doesn't collide with the ardetector version.
     mi_data = tuple(c for c in MEDIAINFO_COLS if c != "path")
@@ -889,7 +918,7 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
         get_conn()
         .execute(
             f"SELECT {media_cols}, {mi_select}, {ar_select}, {plex_cols}"
-            " FROM media_file m"
+            " FROM video_file m"
             " LEFT JOIN mediainfo  mi ON mi.path = m.path"
             " LEFT JOIN ardetector ar ON ar.path = m.path"
             " LEFT JOIN plex_item   p ON p.local_path = m.path"
@@ -904,7 +933,7 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
     plex_names = tuple(
         f"plex_{c}" for c in PLEX_ITEM_COLS if c not in {"path", "local_path"}
     )
-    col_names = (*MEDIA_COLS, *mi_names, *ar_names, *plex_names)
+    col_names = (*VIDEO_COLS, *mi_names, *ar_names, *plex_names)
     return [make_row(LibraryRow, col_names, r) for r in rows]
 
 
@@ -913,12 +942,12 @@ def like_prefix(p: str) -> str:
 
 
 def library_paths(path_prefix: str) -> list[str]:
-    """Every media_file.path under the library, sorted. Caller may filter."""
+    """Every video_file.path under the library, sorted. Caller may filter."""
     like = like_prefix(path_prefix)
     rows = (
         get_conn()
         .execute(
-            "SELECT path FROM media_file WHERE path LIKE ? ESCAPE '\\' ORDER BY path",
+            "SELECT path FROM video_file WHERE path LIKE ? ESCAPE '\\' ORDER BY path",
             (like,),
         )
         .fetchall()
@@ -946,9 +975,9 @@ def library_tracks(
         )
     subtitle_cols = ", ".join(SUBTITLE_COLS)
     for row in conn.execute(
-        f"SELECT path, {subtitle_cols}"
-        " FROM subtitle_track WHERE path LIKE ? ESCAPE '\\'"
-        " ORDER BY path, idx",
+        f"SELECT video_path, {subtitle_cols}"
+        " FROM subtitle_track WHERE video_path LIKE ? ESCAPE '\\'"
+        " ORDER BY video_path, subtitle_path IS NOT NULL, subtitle_path, idx",
         (like,),
     ):
         subtitle.setdefault(row[0], []).append(
@@ -960,7 +989,7 @@ def library_tracks(
 
 
 def delete_orphans(present: Iterable[Path | str]) -> None:
-    """Delete media_file rows whose path is not in `present`."""
+    """Delete video_file rows whose path is not in `present`."""
     orphans = sorted(list_paths() - {str(p) for p in present})
     if not orphans:
         return
@@ -970,7 +999,7 @@ def delete_orphans(present: Iterable[Path | str]) -> None:
         chunk = orphans[i : i + 500]
         placeholders = ",".join("?" * len(chunk))
         cur = conn.execute(
-            f"DELETE FROM media_file WHERE path IN ({placeholders})",
+            f"DELETE FROM video_file WHERE path IN ({placeholders})",
             chunk,
         )
         total += cur.rowcount or 0

@@ -560,8 +560,7 @@ def to_audio_row(a: AudioTrack) -> AudioTrackRow:
 def to_internal_sub_row(s: SubtitleTrack) -> SubtitleTrackRow:
     return SubtitleTrackRow(
         idx=s.idx,
-        source="internal",
-        file_path=None,
+        subtitle_path=None,
         codec=s.codec,
         language=s.language,
         title=s.title,

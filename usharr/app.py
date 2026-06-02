@@ -434,7 +434,7 @@ class InfoByContentIdResponse(InfoResponse):
     plex_files: list[str]
 
 
-def build_info(mf: db.MediaFileRow) -> InfoResponse:
+def build_info(mf: db.VideoFileRow) -> InfoResponse:
     path = mf.path
     mi = db.get_mediainfo(path)
     ar = db.get_ardetector(path)
@@ -781,7 +781,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
 
 
 def detail_view(
-    mf: db.MediaFileRow,
+    mf: db.VideoFileRow,
     mi: db.MediainfoRow | None,
     ar: db.ArdetectorRow | None,
 ) -> dict:

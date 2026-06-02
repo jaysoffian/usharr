@@ -116,7 +116,7 @@ def subtitle_file_exts(media_path: str, subs: list[SubtitleTrackRow]) -> list[st
     don't share a useful base, the suffix falls back to the basename.
     """
     paths = [media_path]
-    paths.extend(t.file_path for t in subs if t.source == "external" and t.file_path)
+    paths.extend(t.subtitle_path for t in subs if t.subtitle_path)
     cp = os.path.commonprefix(paths)
     dot = cp.rfind(".")
     if dot != -1:
@@ -126,7 +126,7 @@ def subtitle_file_exts(media_path: str, subs: list[SubtitleTrackRow]) -> list[st
         base = cp[: slash + 1] if slash != -1 else ""
     out: list[str] = []
     for t in subs:
-        p = t.file_path if t.source == "external" and t.file_path else media_path
+        p = t.subtitle_path or media_path
         out.append(p[len(base) :] if base and p.startswith(base) else p)
     return out
 

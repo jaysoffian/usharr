@@ -143,20 +143,16 @@ class Scanner:
                 logger.warning("stat failed for %s: %s", path, exc)
                 continue
 
-            subtitle_paths = subtitles.find_subtitles(path)
-            subtitles_mtime = subtitles.mtime_ns_max(subtitle_paths)
-            if mf := db.get(path):
-                changed = mf.size_bytes != st.st_size or mf.mtime_ns != st.st_mtime_ns
-                subtitles_changed = mf.subtitles_mtime_ns != subtitles_mtime
+            if vf := db.get(path):
+                changed = vf.size_bytes != st.st_size or vf.mtime_ns != st.st_mtime_ns
             else:
-                changed = subtitles_changed = True
+                changed = True
 
-            if changed or subtitles_changed:
-                db.upsert_media_file(
+            if changed:
+                db.upsert_video_file(
                     path=path,
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
-                    subtitles_mtime_ns=subtitles_mtime,
                 )
 
             if changed or req.force_refresh:
@@ -169,8 +165,13 @@ class Scanner:
             if db.get_ardetector(path) is None:
                 self.ardetector.enqueue(path)
 
-            if subtitles_changed:
-                subtitles.update_external_subs(path, subtitle_paths)
+            # Reconcile sidecars from disk every scan so adds/deletes/edits
+            # are caught; cheap when nothing changed (stat + compare only).
+            # Guard so one bad sidecar can't abort the whole scan pass.
+            try:
+                subtitles.sync_external_subs(path, subtitles.find_subtitle_files(path))
+            except Exception as exc:
+                logger.warning("subtitle sync failed for %s: %s", path, exc)
 
         logger.info("scan completed in %.1fs", time.monotonic() - start)
 
