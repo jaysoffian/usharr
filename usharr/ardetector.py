@@ -1061,7 +1061,7 @@ async def detect(path: Path) -> DetectionResult:
 
 def to_ardetector_row(path: Path, result: DetectionResult) -> ArdetectorRow:
     return ArdetectorRow(
-        path=str(path),
+        video_path=str(path),
         aspect_primary=result.primary_aspect,
         aspect_widest=result.widest_aspect,
         aspect_samples=json.dumps([asdict(d) for d in result.detected]),

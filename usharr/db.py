@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS subtitle_file (
     + CREATE_SUBTITLE_TRACK
     + """
 CREATE TABLE IF NOT EXISTS mediainfo (
-    path               TEXT PRIMARY KEY REFERENCES video_file(path) ON DELETE CASCADE,
+    video_path         TEXT PRIMARY KEY REFERENCES video_file(path) ON DELETE CASCADE,
     error              TEXT,
     container          TEXT,
     duration           REAL,
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS mediainfo (
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS ardetector (
-    path           TEXT PRIMARY KEY REFERENCES video_file(path) ON DELETE CASCADE,
+    video_path     TEXT PRIMARY KEY REFERENCES video_file(path) ON DELETE CASCADE,
     error          TEXT,
     aspect_primary REAL,
     aspect_widest  REAL,
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS ardetector (
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS audio_track (
-    path             TEXT NOT NULL REFERENCES video_file(path) ON DELETE CASCADE,
+    video_path       TEXT NOT NULL REFERENCES video_file(path) ON DELETE CASCADE,
     idx              INTEGER NOT NULL,
     codec            TEXT,
     channels         INTEGER,
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS audio_track (
     sample_rate      INTEGER,
     bit_depth        INTEGER,
     compression_mode TEXT,
-    PRIMARY KEY (path, idx)
+    PRIMARY KEY (video_path, idx)
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS kv (
@@ -185,7 +185,7 @@ class VideoFileRow:
 
 @dataclass(frozen=True, slots=True)
 class MediainfoRow:
-    path: str
+    video_path: str
     error: str | None = None
     container: str | None = None
     duration: float | None = None
@@ -203,7 +203,7 @@ class MediainfoRow:
 
 @dataclass(frozen=True, slots=True)
 class ArdetectorRow:
-    path: str
+    video_path: str
     error: str | None = None
     aspect_primary: float | None = None
     aspect_widest: float | None = None
@@ -346,6 +346,7 @@ def init_db() -> None:
     maybe_drop_discovered_at()
     maybe_drop_timestamp_columns()
     maybe_add_ardetector_color_pct()
+    maybe_rename_path_to_video_path()
     maybe_reprobe_on_schema_bump()
     logger.info("Opened DB at %s", DB_PATH)
 
@@ -391,6 +392,20 @@ def maybe_add_ardetector_color_pct() -> None:
         return
     conn.execute("ALTER TABLE ardetector ADD COLUMN color_pct REAL")
     logger.info("Added ardetector.color_pct")
+
+
+def maybe_rename_path_to_video_path() -> None:
+    """One-shot rename of the video FK column `path` -> `video_path` on the
+    child tables. `video_file`/`subtitle_file` keep `path` (their own
+    identity). No-op on fresh DBs and already-migrated DBs.
+    """
+    conn = get_conn()
+    for table in ("mediainfo", "ardetector", "audio_track"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if "path" not in cols or "video_path" in cols:
+            continue
+        conn.execute(f"ALTER TABLE {table} RENAME COLUMN path TO video_path")
+        logger.info("Renamed %s.path to video_path", table)
 
 
 def maybe_rename_media_file_to_video_file() -> None:
@@ -593,7 +608,7 @@ def upsert_video_file(
 # --- mediainfo ------------------------------------------------------------
 
 MEDIAINFO_COLS = (
-    "path",
+    "video_path",
     "error",
     "container",
     "duration",
@@ -614,7 +629,7 @@ def get_mediainfo(path: Path | str) -> MediainfoRow | None:
     cols = ", ".join(MEDIAINFO_COLS)
     row = (
         get_conn()
-        .execute(f"SELECT {cols} FROM mediainfo WHERE path = ?", (str(path),))
+        .execute(f"SELECT {cols} FROM mediainfo WHERE video_path = ?", (str(path),))
         .fetchone()
     )
     if row is None:
@@ -632,7 +647,7 @@ def upsert_mediainfo(
     subtitle tracks. External subtitles aren't touched (they live or die
     with the subtitle files — see ``replace_external_subtitles``).
     """
-    path_str = row.path
+    path_str = row.video_path
     placeholders = ", ".join("?" * len(MEDIAINFO_COLS))
     cols = ", ".join(MEDIAINFO_COLS)
     values = tuple(getattr(row, c) for c in MEDIAINFO_COLS)
@@ -643,11 +658,11 @@ def upsert_mediainfo(
             f"INSERT OR REPLACE INTO mediainfo ({cols}) VALUES ({placeholders})",
             values,
         )
-        conn.execute("DELETE FROM audio_track WHERE path = ?", (path_str,))
+        conn.execute("DELETE FROM audio_track WHERE video_path = ?", (path_str,))
         for t in audio:
             conn.execute(
                 "INSERT INTO audio_track"
-                " (path, idx, codec, channels, layout, language, title,"
+                " (video_path, idx, codec, channels, layout, language, title,"
                 "  is_default, is_forced, format, commercial_name,"
                 "  bit_rate, bit_rate_mode, sample_rate, bit_depth,"
                 "  compression_mode)"
@@ -700,7 +715,7 @@ def upsert_mediainfo(
 
 
 def delete_mediainfo(path: Path) -> None:
-    get_conn().execute("DELETE FROM mediainfo WHERE path = ?", (str(path),))
+    get_conn().execute("DELETE FROM mediainfo WHERE video_path = ?", (str(path),))
 
 
 def set_mediainfo_error(path: Path, error: str) -> None:
@@ -708,8 +723,8 @@ def set_mediainfo_error(path: Path, error: str) -> None:
     metadata. Inserts a near-blank row if none exists.
     """
     get_conn().execute(
-        "INSERT INTO mediainfo (path, error) VALUES (?, ?)"
-        " ON CONFLICT(path) DO UPDATE SET error = excluded.error",
+        "INSERT INTO mediainfo (video_path, error) VALUES (?, ?)"
+        " ON CONFLICT(video_path) DO UPDATE SET error = excluded.error",
         (str(path), error),
     )
 
@@ -720,7 +735,7 @@ def set_mediainfo_duration(path: Path, duration: float) -> None:
     No-op if no mediainfo row exists for `path`.
     """
     get_conn().execute(
-        "UPDATE mediainfo SET duration = ? WHERE path = ? AND duration IS NULL",
+        "UPDATE mediainfo SET duration = ? WHERE video_path = ? AND duration IS NULL",
         (duration, str(path)),
     )
 
@@ -728,7 +743,7 @@ def set_mediainfo_duration(path: Path, duration: float) -> None:
 # --- ardetector -----------------------------------------------------------
 
 ARDETECTOR_COLS = (
-    "path",
+    "video_path",
     "error",
     "aspect_primary",
     "aspect_widest",
@@ -741,7 +756,7 @@ def get_ardetector(path: Path | str) -> ArdetectorRow | None:
     cols = ", ".join(ARDETECTOR_COLS)
     row = (
         get_conn()
-        .execute(f"SELECT {cols} FROM ardetector WHERE path = ?", (str(path),))
+        .execute(f"SELECT {cols} FROM ardetector WHERE video_path = ?", (str(path),))
         .fetchone()
     )
     if row is None:
@@ -750,7 +765,7 @@ def get_ardetector(path: Path | str) -> ArdetectorRow | None:
 
 
 def delete_ardetector(path: Path) -> None:
-    get_conn().execute("DELETE FROM ardetector WHERE path = ?", (str(path),))
+    get_conn().execute("DELETE FROM ardetector WHERE video_path = ?", (str(path),))
 
 
 def upsert_ardetector(row: ArdetectorRow) -> None:
@@ -800,7 +815,7 @@ def get_audio_tracks(path: str) -> list[AudioTrackRow]:
     rows = (
         get_conn()
         .execute(
-            f"SELECT {cols} FROM audio_track WHERE path = ? ORDER BY idx",
+            f"SELECT {cols} FROM audio_track WHERE video_path = ? ORDER BY idx",
             (path,),
         )
         .fetchall()
@@ -901,13 +916,13 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
     ``get_subtitle_tracks(path)`` as needed.
     """
     media_cols = ", ".join(f"m.{c}" for c in VIDEO_COLS)
-    # mediainfo: skip the duplicate `path` column; alias `error` so it
+    # mediainfo: skip the duplicate `video_path` column; alias `error` so it
     # doesn't collide with the ardetector version.
-    mi_data = tuple(c for c in MEDIAINFO_COLS if c != "path")
+    mi_data = tuple(c for c in MEDIAINFO_COLS if c != "video_path")
     mi_select = ", ".join(
         f"mi.{c} AS mediainfo_{c}" if c == "error" else f"mi.{c}" for c in mi_data
     )
-    ar_data = tuple(c for c in ARDETECTOR_COLS if c != "path")
+    ar_data = tuple(c for c in ARDETECTOR_COLS if c != "video_path")
     ar_select = ", ".join(
         f"ar.{c} AS ardetector_{c}" if c == "error" else f"ar.{c}" for c in ar_data
     )
@@ -919,8 +934,8 @@ def library_rows(path_prefix: str) -> list[LibraryRow]:
         .execute(
             f"SELECT {media_cols}, {mi_select}, {ar_select}, {plex_cols}"
             " FROM video_file m"
-            " LEFT JOIN mediainfo  mi ON mi.path = m.path"
-            " LEFT JOIN ardetector ar ON ar.path = m.path"
+            " LEFT JOIN mediainfo  mi ON mi.video_path = m.path"
+            " LEFT JOIN ardetector ar ON ar.video_path = m.path"
             " LEFT JOIN plex_item   p ON p.local_path = m.path"
             " WHERE m.path LIKE ? ESCAPE '\\'"
             " ORDER BY m.path",
@@ -965,9 +980,9 @@ def library_tracks(
     like = like_prefix(path_prefix)
     audio_cols = ", ".join(AUDIO_COLS)
     for row in conn.execute(
-        f"SELECT path, {audio_cols}"
-        " FROM audio_track WHERE path LIKE ? ESCAPE '\\'"
-        " ORDER BY path, idx",
+        f"SELECT video_path, {audio_cols}"
+        " FROM audio_track WHERE video_path LIKE ? ESCAPE '\\'"
+        " ORDER BY video_path, idx",
         (like,),
     ):
         audio.setdefault(row[0], []).append(

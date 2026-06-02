@@ -572,7 +572,7 @@ def to_internal_sub_row(s: SubtitleTrack) -> SubtitleTrackRow:
 
 def to_mediainfo_row(path: Path, mi: MediaInfoResult) -> MediainfoRow:
     base = MediainfoRow(
-        path=str(path),
+        video_path=str(path),
         container=mi.container,
         duration=mi.duration,
     )

@@ -113,7 +113,9 @@ class ArdetectorProber(Prober):
             result = await ardetector.detect(path)
         except Exception as exc:
             self.logger.exception("%s: %s", path, exc)
-            db.upsert_ardetector(db.ArdetectorRow(path=str(path), error=str(exc)[:500]))
+            db.upsert_ardetector(
+                db.ArdetectorRow(video_path=str(path), error=str(exc)[:500])
+            )
             return
 
         db.upsert_ardetector(ardetector.to_ardetector_row(path, result))
