@@ -4,7 +4,6 @@ Subcommands:
     auth                     Link this usharr to a Plex account (PIN OAuth).
     auth --status            Show current link state.
     auth --reset             Forget the stored Plex token and server.
-    import-legacy <old.db>   Carry ardetector + Plex link from a pre-Oxyde DB.
 """
 
 import argparse
@@ -65,21 +64,6 @@ async def auth_link() -> int:
     return 0
 
 
-async def cmd_import_legacy(args: argparse.Namespace) -> int:
-    """Carry forward the slow-to-reacquire ardetector data and the Plex link
-    from a pre-Oxyde usharr.db. Run after a scan has repopulated video_file.
-    """
-    await database.connect()
-    try:
-        n = await database.import_legacy_ardetector(args.old_db)
-        linked = await database.import_legacy_plex_auth(args.old_db)
-        print(f"Imported {n} ardetector row(s).")
-        print("Imported Plex link." if linked else "No Plex link imported.")
-        return 0
-    finally:
-        await database.close()
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="usharr")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -88,12 +72,6 @@ def main(argv: list[str] | None = None) -> int:
     p_auth.add_argument("--status", action="store_true", help="show link state")
     p_auth.add_argument("--reset", action="store_true", help="forget stored token")
     p_auth.set_defaults(func=cmd_auth)
-
-    p_import = sub.add_parser(
-        "import-legacy", help="carry data from a pre-Oxyde usharr.db"
-    )
-    p_import.add_argument("old_db", help="path to the old usharr.db")
-    p_import.set_defaults(func=cmd_import_legacy)
 
     args = parser.parse_args(argv)
     return asyncio.run(args.func(args))
