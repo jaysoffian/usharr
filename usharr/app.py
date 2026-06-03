@@ -15,6 +15,7 @@ from fastapi import APIRouter, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from oxyde_admin import FastAPIAdmin
 from pydantic import BaseModel
 
 from usharr import database, models, plex, probers, queries
@@ -65,6 +66,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="usharr", lifespan=lifespan)
 api = APIRouter(prefix="/api")
+
+# Oxyde admin panel
+admin = FastAPIAdmin(title="usharr admin")
+admin.register_all()
+assert admin.app is not None
+app.mount("/admin", admin.app)
 
 here = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=here / "static"), name="static")

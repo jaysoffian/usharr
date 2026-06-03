@@ -291,6 +291,18 @@ wheels = [
 ]
 
 [[package]]
+name = "oxyde-admin"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "oxyde" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/47/59/68f79005e23c21acd633761d2d9c0de2bd58db5b14cd3eb16926b4ab8e2f/oxyde_admin-0.4.0.tar.gz", hash = "sha256:9026d1f12e5a92daafed80a62e127073a17fc2c40c711e5d67913098a09e57f7", size = 995677, upload-time = "2026-05-01T10:24:47.972Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f8/76/a9dfd885ae8a20cc0ba79ac96e02f54929e9b39d4fb1576caa881edb5b57/oxyde_admin-0.4.0-py3-none-any.whl", hash = "sha256:62a5c0796bd108a279208ae12eaf256bfa50e654bacb1594573ec45e76377c58", size = 995597, upload-time = "2026-05-01T10:24:46.113Z" },
+]
+
+[[package]]
 name = "oxyde-core"
 version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
@@ -524,6 +536,7 @@ dependencies = [
     { name = "langcodes" },
     { name = "language-data" },
     { name = "oxyde" },
+    { name = "oxyde-admin" },
     { name = "pydantic" },
     { name = "pymediainfo" },
     { name = "python-multipart" },
@@ -539,6 +552,7 @@ requires-dist = [
     { name = "langcodes", specifier = ">=3.5" },
     { name = "language-data", specifier = ">=1.3" },
     { name = "oxyde", specifier = ">=0.7.1" },
+    { name = "oxyde-admin", specifier = ">=0.4.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pymediainfo", specifier = ">=7.0.1" },
     { name = "python-multipart" },

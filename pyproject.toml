@@ -9,6 +9,7 @@ dependencies = [
     "langcodes>=3.5",
     "language-data>=1.3",
     "oxyde>=0.7.1",
+    "oxyde-admin>=0.4.0",
     "pydantic>=2",
     "pymediainfo>=7.0.1",
     "python-multipart",
