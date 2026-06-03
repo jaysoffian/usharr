@@ -56,7 +56,7 @@ library:
 #     "/media/TV Shows": /some/where/else/TV Shows
 
 ###############################################################################
-# Enable Bazarr deep links (optional)
+# Enable Bazarr integration (optional)
 # Provides: deep linking to video files in Bazarr
 # Note: requires Radarr and/or Sonarr integrations
 #
