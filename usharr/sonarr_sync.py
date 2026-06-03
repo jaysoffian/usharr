@@ -9,7 +9,7 @@ import logging
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from usharr import db
+from usharr import queries
 from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -54,15 +54,15 @@ async def sync() -> None:
         seen: set[int] = set()
         for row in series:
             seen.add(row.id)
-            db.upsert_sonarr_series(
+            await queries.upsert_sonarr_series(
                 series_id=row.id,
                 title_slug=row.title_slug or None,
                 remote_path=row.path or None,
                 path_map=s.path_map,
             )
 
-        stale = sorted(db.list_sonarr_series_ids() - seen)
-        removed = db.delete_sonarr_series(stale) if stale else 0
+        stale = sorted(await queries.list_sonarr_series_ids() - seen)
+        removed = await queries.delete_sonarr_series(stale) if stale else 0
         logger.info("sonarr_sync: series=%d removed=%d", len(series), removed)
     except Exception:
         logger.exception("sonarr_sync errored")

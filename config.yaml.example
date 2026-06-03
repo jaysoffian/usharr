@@ -36,15 +36,17 @@ library:
 #   url: https://plexdash.example.com
 
 ###############################################################################
-# Enable Bazarr integration (optional)
+# Enable Bazarr deep links (optional)
 # Provides: deep linking to video files in Bazarr
+#
+# No API key or path_map needed: links reuse the Radarr movie id / Sonarr
+# series id Usharr already caches. Set the base URL and turn on whichever
+# types you manage in Bazarr.
 #
 # bazarr:
 #   url: https://bazarr.example.com
-#   api_key: 11223344556677889900aabbccddeeff
-#   path_map:
-#     "/media/Movies": /some/where/else/Movies
-#     "/media/TV Shows": /some/where/else/TV Shows
+#   link_movies: true
+#   link_series: true
 
 ######################################################
 # Enable Radarr integration (optional)

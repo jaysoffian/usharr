@@ -12,7 +12,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from usharr.db import ArdetectorRow
+from usharr.models import Ardetector
 
 logger = logging.getLogger(__name__)
 
@@ -1059,11 +1059,13 @@ async def detect(path: Path) -> DetectionResult:
     )
 
 
-def to_ardetector_row(path: Path, result: DetectionResult) -> ArdetectorRow:
-    return ArdetectorRow(
-        video_path=str(path),
-        aspect_primary=result.primary_aspect,
-        aspect_widest=result.widest_aspect,
-        aspect_samples=json.dumps([asdict(d) for d in result.detected]),
-        color_pct=result.color_pct,
+def to_ardetector_row(path: Path, result: DetectionResult) -> Ardetector:
+    return Ardetector.model_validate(
+        {
+            "video_path": str(path),
+            "aspect_primary": result.primary_aspect,
+            "aspect_widest": result.widest_aspect,
+            "aspect_samples": json.dumps([asdict(d) for d in result.detected]),
+            "color_pct": result.color_pct,
+        }
     )

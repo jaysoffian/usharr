@@ -7,8 +7,8 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from usharr import bazarr_sync, db, plex_sync, radarr_sync, sonarr_sync, subtitles
 from usharr import format as fmt
+from usharr import plex_sync, queries, radarr_sync, sonarr_sync, subtitles
 from usharr.config import get_config
 from usharr.probers import ArdetectorProber, MediainfoProber
 
@@ -45,7 +45,7 @@ class Scanner:
         self.queue: asyncio.Queue[ScanRequest] = asyncio.Queue()
         self.tasks: tuple[asyncio.Task, ...] = ()
 
-    def enqueue(
+    async def enqueue(
         self,
         /,
         req: ScanRequest,
@@ -55,10 +55,10 @@ class Scanner:
             self.queue.put_nowait(req)
             return
         if req.force_refresh:
-            db.delete_mediainfo(req.path)
+            await queries.delete_mediainfo(req.path)
             self.mediainfo.enqueue(req.path, priority=-time.monotonic())
         if req.force_detect:
-            db.delete_ardetector(req.path)
+            await queries.delete_ardetector(req.path)
             self.ardetector.enqueue(req.path, priority=-time.monotonic())
 
     def start(self) -> None:
@@ -82,7 +82,7 @@ class Scanner:
     async def scan_forever(self) -> None:
         """Periodic full reconcile: scan, then refresh Plex + *arr metadata."""
         while True:
-            self.enqueue(ScanRequest())
+            await self.enqueue(ScanRequest())
             await self.queue.join()
             await asyncio.sleep(INTERVAL_SECONDS)
 
@@ -134,7 +134,7 @@ class Scanner:
         start = time.monotonic()
 
         videos = self.find_video_files()
-        db.delete_orphans(videos)
+        await queries.delete_orphans(videos)
 
         for path in videos:
             try:
@@ -143,33 +143,35 @@ class Scanner:
                 logger.warning("stat failed for %s: %s", path, exc)
                 continue
 
-            if vf := db.get(path):
+            if vf := await queries.get(path):
                 changed = vf.size_bytes != st.st_size or vf.mtime_ns != st.st_mtime_ns
             else:
                 changed = True
 
             if changed:
-                db.upsert_video_file(
+                await queries.upsert_video_file(
                     path=path,
                     size_bytes=st.st_size,
                     mtime_ns=st.st_mtime_ns,
                 )
 
             if changed or req.force_refresh:
-                db.delete_mediainfo(path)
+                await queries.delete_mediainfo(path)
             if changed or req.force_detect:
-                db.delete_ardetector(path)
+                await queries.delete_ardetector(path)
 
-            if db.get_mediainfo(path) is None:
+            if await queries.get_mediainfo(path) is None:
                 self.mediainfo.enqueue(path)
-            if db.get_ardetector(path) is None:
+            if await queries.get_ardetector(path) is None:
                 self.ardetector.enqueue(path)
 
             # Reconcile sidecars from disk every scan so adds/deletes/edits
             # are caught; cheap when nothing changed (stat + compare only).
             # Guard so one bad sidecar can't abort the whole scan pass.
             try:
-                subtitles.sync_external_subs(path, subtitles.find_subtitle_files(path))
+                await subtitles.sync_external_subs(
+                    path, subtitles.find_subtitle_files(path)
+                )
             except Exception as exc:
                 logger.warning("subtitle sync failed for %s: %s", path, exc)
 
@@ -180,7 +182,6 @@ class Scanner:
         start = time.monotonic()
         await asyncio.gather(
             plex_sync.sync(),
-            bazarr_sync.sync(),
             radarr_sync.sync(),
             sonarr_sync.sync(),
         )

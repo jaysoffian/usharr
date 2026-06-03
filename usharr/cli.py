@@ -1,37 +1,38 @@
 """Command-line entry point.
 
 Subcommands:
-    auth              Link this usharr to a Plex account (PIN OAuth).
-    auth --status     Show current link state.
-    auth --reset      Forget the stored Plex token and server.
+    auth                     Link this usharr to a Plex account (PIN OAuth).
+    auth --status            Show current link state.
+    auth --reset             Forget the stored Plex token and server.
+    import-legacy <old.db>   Carry ardetector + Plex link from a pre-Oxyde DB.
 """
 
 import argparse
 import asyncio
 import sys
 
-from usharr import db, plex
+from usharr import database, plex
 from usharr.config import get_config
 
 
 async def cmd_auth(args: argparse.Namespace) -> int:
     get_config()
-    db.init_db()
+    await database.connect()
     try:
         if args.status:
-            return auth_status()
+            return await auth_status()
         if args.reset:
-            plex.clear_auth()
+            await plex.clear_auth()
             print("Cleared stored Plex credentials.")
             return 0
         return await auth_link()
     finally:
-        db.close_db()
+        await database.close()
 
 
-def auth_status() -> int:
+async def auth_status() -> int:
     try:
-        token, url, name = plex.load_auth()
+        token, url, name = await plex.load_auth()
     except plex.PlexNotLinkedError as exc:
         print(str(exc))
         return 1
@@ -41,7 +42,7 @@ def auth_status() -> int:
 
 
 async def auth_link() -> int:
-    client_id = plex.get_or_create_client_id()
+    client_id = await plex.get_or_create_client_id()
     pin = await plex.create_pin(client_id)
     print("Open this URL in a browser and click Allow:")
     print(f"  {plex.auth_url(client_id, pin.code)}")
@@ -58,10 +59,25 @@ async def auth_link() -> int:
         print(f"Authorized as {email}.")
 
     url, name = await plex.discover_server(client_id, token)
-    plex.save_auth(token, url, name)
+    await plex.save_auth(token, url, name)
     print(f"Discovered server: {name} at {url}")
     print("Saved credentials to /config/usharr.db.")
     return 0
+
+
+async def cmd_import_legacy(args: argparse.Namespace) -> int:
+    """Carry forward the slow-to-reacquire ardetector data and the Plex link
+    from a pre-Oxyde usharr.db. Run after a scan has repopulated video_file.
+    """
+    await database.connect()
+    try:
+        n = await database.import_legacy_ardetector(args.old_db)
+        linked = await database.import_legacy_plex_auth(args.old_db)
+        print(f"Imported {n} ardetector row(s).")
+        print("Imported Plex link." if linked else "No Plex link imported.")
+        return 0
+    finally:
+        await database.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -72,6 +88,12 @@ def main(argv: list[str] | None = None) -> int:
     p_auth.add_argument("--status", action="store_true", help="show link state")
     p_auth.add_argument("--reset", action="store_true", help="forget stored token")
     p_auth.set_defaults(func=cmd_auth)
+
+    p_import = sub.add_parser(
+        "import-legacy", help="carry data from a pre-Oxyde usharr.db"
+    )
+    p_import.add_argument("old_db", help="path to the old usharr.db")
+    p_import.set_defaults(func=cmd_import_legacy)
 
     args = parser.parse_args(argv)
     return asyncio.run(args.func(args))

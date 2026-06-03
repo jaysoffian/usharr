@@ -7,8 +7,11 @@ from pathlib import Path
 
 import langcodes
 
-from usharr.db import AudioTrackRow, MediainfoRow, SubtitleTrackRow
+from usharr import models
 from usharr.langs import to_english_name
+
+# Subtitle view code treats internal + external tracks uniformly.
+SubtitleTrack = models.SubtitleTrackInternal | models.SubtitleTrackExternal
 
 YEAR_RE = re.compile(r"\((\d{4})\)")
 EDITION_RE = re.compile(r"\{edition-([^}]+)\}")
@@ -106,7 +109,7 @@ def lang_name(code: str | None) -> str:
     return to_english_name(code)
 
 
-def subtitle_file_exts(media_path: str, subs: list[SubtitleTrackRow]) -> list[str]:
+def subtitle_file_exts(media_path: str, subs: list[SubtitleTrack]) -> list[str]:
     """Per-track filename suffix after the longest base shared by the
     media file and any external subtitle files.
 
@@ -116,7 +119,7 @@ def subtitle_file_exts(media_path: str, subs: list[SubtitleTrackRow]) -> list[st
     don't share a useful base, the suffix falls back to the basename.
     """
     paths = [media_path]
-    paths.extend(t.subtitle_path for t in subs if t.subtitle_path)
+    paths.extend(sp for t in subs if (sp := getattr(t, "subtitle_path", None)))
     cp = os.path.commonprefix(paths)
     dot = cp.rfind(".")
     if dot != -1:
@@ -126,14 +129,14 @@ def subtitle_file_exts(media_path: str, subs: list[SubtitleTrackRow]) -> list[st
         base = cp[: slash + 1] if slash != -1 else ""
     out: list[str] = []
     for t in subs:
-        p = t.subtitle_path or media_path
+        p = getattr(t, "subtitle_path", None) or media_path
         out.append(p[len(base) :] if base and p.startswith(base) else p)
     return out
 
 
 def mediainfo_badges(
-    mi: MediainfoRow | None,
-    audio_tracks: list[AudioTrackRow],
+    mi: models.Mediainfo | None,
+    audio_tracks: list[models.AudioTrack],
 ) -> list[dict]:
     """Pick brand-mark badges (DV / HDR10+ / Atmos / DD+ / ...) for the nav.
 
@@ -499,7 +502,7 @@ def clean_audio_title(title: str | None, lang_code: str | None) -> str:
     return result
 
 
-def format_audio_details(t: AudioTrackRow) -> str:
+def format_audio_details(t: models.AudioTrack) -> str:
     """Compact per-track technical line: codec / layout / rate / bitrate / depth.
 
     Compression mode is intentionally omitted — it's redundant with the
@@ -519,7 +522,7 @@ def format_audio_details(t: AudioTrackRow) -> str:
     return " / ".join(parts)
 
 
-def format_audio(audio_tracks: list[AudioTrackRow]) -> str:
+def format_audio(audio_tracks: list[models.AudioTrack]) -> str:
     """Primary track summary, e.g. 'English (EAC3 5.1)' or just '(EAC3 5.1)'."""
     primary = pick_primary_audio(audio_tracks)
     if primary is None:
@@ -533,7 +536,7 @@ def format_audio(audio_tracks: list[AudioTrackRow]) -> str:
     return f"({inner})"
 
 
-def pick_primary_audio(tracks: list[AudioTrackRow]) -> AudioTrackRow | None:
+def pick_primary_audio(tracks: list[models.AudioTrack]) -> models.AudioTrack | None:
     if not tracks:
         return None
     for t in tracks:
@@ -559,7 +562,7 @@ SUB_FORMAT_PREF = {
 }
 
 
-def format_sub_chip(subtitle_tracks: list[SubtitleTrackRow]) -> dict | None:
+def format_sub_chip(subtitle_tracks: list[SubtitleTrack]) -> dict | None:
     """The single best English-sub chip, or None if no English subs.
 
     Tier priority: text-based non-SDH > text-based SDH > raster
@@ -568,7 +571,7 @@ def format_sub_chip(subtitle_tracks: list[SubtitleTrackRow]) -> dict | None:
     Shape: ``{"fmt": "SRT", "sdh": False}``.
     """
 
-    def tier(t: SubtitleTrackRow) -> int:
+    def tier(t: SubtitleTrack) -> int:
         fmt = (t.codec or "").upper()
         if fmt in TEXT_SUB_FORMATS:
             return 1 if t.is_sdh else 0
@@ -576,7 +579,7 @@ def format_sub_chip(subtitle_tracks: list[SubtitleTrackRow]) -> dict | None:
             return 3 if t.is_sdh else 2
         return 4
 
-    def within_tier(t: SubtitleTrackRow) -> tuple[int, str]:
+    def within_tier(t: SubtitleTrack) -> tuple[int, str]:
         fmt = (t.codec or "").upper()
         return SUB_FORMAT_PREF.get(fmt, 99), fmt
 

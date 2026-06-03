@@ -9,7 +9,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from usharr import ardetector, db, mediainfo
+from usharr import ardetector, mediainfo, queries
+from usharr.models import Ardetector
 
 
 class ProberEvents:
@@ -95,13 +96,14 @@ class MediainfoProber(Prober):
             mi = await mediainfo.extract(path)
         except Exception as exc:
             self.logger.exception("%s: %s", path, exc)
-            db.set_mediainfo_error(path, str(exc)[:500])
+            await queries.set_mediainfo_error(path, str(exc)[:500])
             return
 
-        db.upsert_mediainfo(
+        sp = str(path)
+        await queries.upsert_mediainfo(
             mediainfo.to_mediainfo_row(path, mi),
-            audio=[mediainfo.to_audio_row(a) for a in mi.audio],
-            internal_subs=[mediainfo.to_internal_sub_row(s) for s in mi.subtitle],
+            audio=[mediainfo.to_audio_row(sp, a) for a in mi.audio],
+            internal_subs=[mediainfo.to_internal_sub_row(sp, s) for s in mi.subtitle],
         )
 
 
@@ -113,13 +115,15 @@ class ArdetectorProber(Prober):
             result = await ardetector.detect(path)
         except Exception as exc:
             self.logger.exception("%s: %s", path, exc)
-            db.upsert_ardetector(
-                db.ArdetectorRow(video_path=str(path), error=str(exc)[:500])
+            await queries.upsert_ardetector(
+                Ardetector.model_validate(
+                    {"video_path": str(path), "error": str(exc)[:500]}
+                )
             )
             return
 
-        db.upsert_ardetector(ardetector.to_ardetector_row(path, result))
+        await queries.upsert_ardetector(ardetector.to_ardetector_row(path, result))
         # Backfill duration onto mediainfo if mediainfo didn't get one since
         # the AR sampler measures runtime as a side effect.
         if result.duration is not None:
-            db.set_mediainfo_duration(path, result.duration)
+            await queries.set_mediainfo_duration(path, result.duration)

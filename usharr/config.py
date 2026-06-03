@@ -39,16 +39,13 @@ library:
 # tautulli:
 #   url: https://plexdash.home.example.com
 
-# Optional: Bazarr for subtitle deep-links. Requires an API key from
-# Bazarr → Settings → General → Security. path_map (optional) maps
-# usharr's mount prefixes to the prefixes the external service reports,
-# for cases where the two aren't mounted identically.
+# Optional: Bazarr subtitle deep-links. No API key needed — links reuse the
+# Radarr movie id / Sonarr series id usharr already caches. Set the base URL
+# and turn on whichever types you manage in Bazarr.
 # bazarr:
 #   url: https://bazarr.home.example.com
-#   api_key: <your-api-key>
-#   path_map:
-#     "/media/Movies": /some/where/else/Movies
-#     "/media/TV Shows": /some/where/else/TV Shows
+#   link_movies: true
+#   link_series: true
 
 # Optional: Radarr + Sonarr deep-links. API keys from the respective
 # Settings → General → Security page.
@@ -97,11 +94,12 @@ class TautulliConfig(StripNonesModel):
 
 
 class BazarrConfig(StripNonesModel):
+    # Bazarr deep-links reuse the Radarr movie id / Sonarr series id usharr
+    # already holds, so no API key is needed — just the base URL plus a flag
+    # per type to say "I use Bazarr for these".
     url: str | None = None
-    api_key: str | None = None
-    # {local_prefix: remote_prefix} — rewrite Bazarr-reported paths
-    # so they match usharr's mounts.
-    path_map: dict[str, str] = Field(default_factory=dict)
+    link_movies: bool = False
+    link_series: bool = False
 
 
 class RadarrConfig(StripNonesModel):

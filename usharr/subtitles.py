@@ -4,9 +4,9 @@ import logging
 import re
 from pathlib import Path
 
-from usharr import db
-from usharr.db import SubtitleTrackRow
+from usharr import queries
 from usharr.langs import norm_lang
+from usharr.models import SubtitleTrackExternal
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,9 @@ def find_subtitle_files(video_path: Path) -> list[Path]:
     return out
 
 
-def parse_text_sub(video_stem: str, path: Path, codec: str | None) -> SubtitleTrackRow:
+def parse_text_sub(
+    video_stem: str, path: Path, codec: str | None
+) -> SubtitleTrackExternal:
     """Produce a subtitle_track row from a sidecar's filename tokens."""
     tail = path.name.removeprefix(video_stem)
     tail = tail.removesuffix(path.suffix)
@@ -79,19 +81,21 @@ def parse_text_sub(video_stem: str, path: Path, codec: str | None) -> SubtitleTr
             maybe = norm_lang(tok)
             if maybe is not None:
                 lang = maybe
-    return SubtitleTrackRow(
-        idx=0,
-        subtitle_path=str(path),
-        codec=codec,
-        language=lang,
-        title=None,
-        is_default=False,
-        is_forced=forced,
-        is_sdh=sdh,
+    return SubtitleTrackExternal.model_validate(
+        {
+            "idx": 0,
+            "subtitle_path": str(path),
+            "codec": codec,
+            "language": lang,
+            "title": None,
+            "is_default": False,
+            "is_forced": forced,
+            "is_sdh": sdh,
+        }
     )
 
 
-def parse_vobsub_idx(video_stem: str, path: Path) -> list[SubtitleTrackRow]:
+def parse_vobsub_idx(video_stem: str, path: Path) -> list[SubtitleTrackExternal]:
     """Produce one row per stream listed in a VobSub ``.idx`` file.
 
     Falls back to a single filename-derived row when the file can't be
@@ -105,7 +109,7 @@ def parse_vobsub_idx(video_stem: str, path: Path) -> list[SubtitleTrackRow]:
     # A real-world .idx may list several languages at the same index; that's
     # one stream, and (subtitle_path, idx) is the external key, so keep only
     # the first row per distinct index.
-    rows: list[SubtitleTrackRow] = []
+    rows: list[SubtitleTrackExternal] = []
     seen: set[int] = set()
     for code, index in VOBSUB_ID_RE.findall(text):
         idx = int(index)
@@ -113,15 +117,17 @@ def parse_vobsub_idx(video_stem: str, path: Path) -> list[SubtitleTrackRow]:
             continue
         seen.add(idx)
         rows.append(
-            SubtitleTrackRow(
-                idx=idx,
-                subtitle_path=str(path),
-                codec="VobSub",
-                language=norm_lang(code),
-                title=None,
-                is_default=False,
-                is_forced=False,
-                is_sdh=False,
+            SubtitleTrackExternal.model_validate(
+                {
+                    "idx": idx,
+                    "subtitle_path": str(path),
+                    "codec": "VobSub",
+                    "language": norm_lang(code),
+                    "title": None,
+                    "is_default": False,
+                    "is_forced": False,
+                    "is_sdh": False,
+                }
             )
         )
     if rows:
@@ -129,7 +135,7 @@ def parse_vobsub_idx(video_stem: str, path: Path) -> list[SubtitleTrackRow]:
     return [parse_text_sub(video_stem, path, "VobSub")]
 
 
-def parse_subtitle_file(video_stem: str, path: Path) -> list[SubtitleTrackRow]:
+def parse_subtitle_file(video_stem: str, path: Path) -> list[SubtitleTrackExternal]:
     """Parse a sidecar into one or more subtitle_track rows."""
     suffix = path.suffix.lower()
     if suffix == ".idx":
@@ -138,7 +144,7 @@ def parse_subtitle_file(video_stem: str, path: Path) -> list[SubtitleTrackRow]:
     return [parse_text_sub(video_stem, path, codec)]
 
 
-def sync_external_subs(video_path: Path, files: list[Path]) -> None:
+async def sync_external_subs(video_path: Path, files: list[Path]) -> None:
     """Reconcile a video's external subtitle rows with its on-disk sidecars.
 
     Cheap when nothing changed: stats the files and compares against the
@@ -152,15 +158,15 @@ def sync_external_subs(video_path: Path, files: list[Path]) -> None:
             continue
         disk[str(p)] = (st.st_size, st.st_mtime_ns)
 
-    existing = db.subtitle_files_for(video_path)
+    existing = await queries.subtitle_files_for(video_path)
     if disk == existing:
         return
 
-    payload: list[tuple[str, int, int, list[SubtitleTrackRow]]] = []
+    payload: list[tuple[str, int, int, list[SubtitleTrackExternal]]] = []
     for p in files:
         key = str(p)
         if key not in disk:
             continue
         size, mtime = disk[key]
         payload.append((key, size, mtime, parse_subtitle_file(video_path.stem, p)))
-    db.replace_external_subtitles(video_path=video_path, files=payload)
+    await queries.replace_external_subtitles(video_path=video_path, files=payload)

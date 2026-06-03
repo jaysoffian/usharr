@@ -1,7 +1,6 @@
 """FastAPI app: endpoints + background scan loop."""
 
 import asyncio
-import dataclasses
 import json
 import logging
 import os
@@ -18,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from usharr import db, plex, probers
+from usharr import database, models, plex, probers, queries
 from usharr import format as fmt
 from usharr.config import get_config
 from usharr.scanner import ScanRequest, scanner
@@ -47,20 +46,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    db.init_db()
+    await database.connect()
     get_config()
     # USHARR_DB_RO: serve the DB read-only without spawning the reconcile
     # / probe loops. Used by `make dev` to test UI changes against a
     # copied prod DB without trashing it (scan deletes any rows
     # whose paths it can't find on disk).
     if os.environ.get("USHARR_DB_RO"):
-        logger.info("usharr started in no-bg mode; db=%s", db.DB_PATH)
+        logger.info("usharr started in no-bg mode; db=%s", database.DB_PATH)
     else:
         scanner.start()
         logger.info("usharr started; library=%s", get_config().library)
     yield
     await scanner.stop()
-    db.close_db()
+    await database.close()
     logger.info("usharr shutdown complete")
 
 
@@ -107,17 +106,20 @@ def library_by_slug(slug: str) -> dict | None:
     return None
 
 
-def library_rows_for(lib: dict) -> list[db.LibraryRow]:
-    return [r for p in lib["paths"] for r in db.library_rows(p)]
+async def library_rows_for(lib: dict) -> list[queries.LibraryRow]:
+    rows: list[queries.LibraryRow] = []
+    for p in lib["paths"]:
+        rows.extend(await queries.LibraryRow.for_prefix(p))
+    return rows
 
 
-def library_tracks_for(
+async def library_tracks_for(
     lib: dict,
 ) -> tuple[dict[str, list], dict[str, list]]:
     audio: dict[str, list] = {}
     subs: dict[str, list] = {}
     for p in lib["paths"]:
-        a, s = db.library_tracks(p)
+        a, s = await queries.LibraryRow.tracks_for_prefix(p)
         audio.update(a)
         subs.update(s)
     return audio, subs
@@ -167,7 +169,7 @@ def jump_letter(display_title: str) -> str:
     return c.upper() if c.isalpha() else "#"
 
 
-def library_sort_key(r: db.LibraryRow) -> tuple:
+def library_sort_key(r: queries.LibraryRow) -> tuple:
     """Library sort: show/title normalized + article-stripped, then S/E.
 
     Episodes group by show (via plex_show_title) and sort by season then
@@ -186,48 +188,36 @@ def library_sort_key(r: db.LibraryRow) -> tuple:
     )
 
 
-def bazarr_url_for(bazarr_base: str | None, local_path: str) -> str | None:
-    """Single-path lookup used by the detail route."""
-    if not bazarr_base:
+async def bazarr_url_for(local_path: str) -> str | None:
+    """Bazarr deep-link for the detail route. Derived from the Radarr movie id
+    / Sonarr series id we already hold, gated by config flags — no Bazarr API."""
+    cfg = get_config().bazarr
+    if not cfg.url:
         return None
-    movie_id = db.bazarr_movie_for_local_path(local_path)
-    if movie_id is not None:
-        return fmt.bazarr_movie_deeplink(bazarr_base, movie_id)
-    series_id = db.bazarr_series_for_local_path(local_path)
-    if series_id is not None:
-        return fmt.bazarr_series_deeplink(bazarr_base, series_id)
+    if cfg.link_movies:
+        movie_id = await queries.radarr_id_for_local_path(local_path)
+        if movie_id is not None:
+            return fmt.bazarr_movie_deeplink(cfg.url, movie_id)
+    if cfg.link_series:
+        series = await queries.series_for_local_path(local_path)
+        if series is not None:
+            return fmt.bazarr_series_deeplink(cfg.url, series.id)
     return None
 
 
-def radarr_url_for(radarr_base: str | None, local_path: str) -> str | None:
+async def radarr_url_for(radarr_base: str | None, local_path: str) -> str | None:
     if not radarr_base:
         return None
-    return fmt.radarr_deeplink(radarr_base, db.radarr_tmdb_for_local_path(local_path))
+    return fmt.radarr_deeplink(
+        radarr_base, await queries.radarr_tmdb_for_local_path(local_path)
+    )
 
 
-def sonarr_url_for(sonarr_base: str | None, local_path: str) -> str | None:
+async def sonarr_url_for(sonarr_base: str | None, local_path: str) -> str | None:
     if not sonarr_base:
         return None
-    return fmt.sonarr_deeplink(sonarr_base, db.sonarr_slug_for_local_path(local_path))
-
-
-def ancestor_match[T](path: str, folder_map: dict[str, T]) -> T | None:
-    """Walk up from `path`'s parent, return the value of the first matching
-    folder in `folder_map`. Fast O(path-depth) ancestor-lookup — replaces
-    the SQL prefix-match for series resolution on the library page.
-    """
-    p = Path(path).parent
-    while True:
-        s = str(p)
-        if not s or s == p.anchor:
-            return None
-        v = folder_map.get(s)
-        if v is not None:
-            return v
-        new_p = p.parent
-        if new_p == p:
-            return None
-        p = new_p
+    series = await queries.series_for_local_path(local_path)
+    return fmt.sonarr_deeplink(sonarr_base, series.title_slug if series else None)
 
 
 def group_tv_rows(episode_rows: list[dict]) -> list[dict]:
@@ -298,7 +288,7 @@ def group_tv_rows(episode_rows: list[dict]) -> list[dict]:
     return out
 
 
-def find_prev_season_path(ordered: list[db.LibraryRow], i: int) -> str | None:
+def find_prev_season_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
     """First episode of the previous season within the same show."""
     cur_show = ordered[i].plex_show_title
     cur_season = ordered[i].plex_season_number
@@ -320,7 +310,7 @@ def find_prev_season_path(ordered: list[db.LibraryRow], i: int) -> str | None:
     return None
 
 
-def find_next_season_path(ordered: list[db.LibraryRow], i: int) -> str | None:
+def find_next_season_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
     """First episode of the next season within the same show."""
     cur_show = ordered[i].plex_show_title
     cur_season = ordered[i].plex_season_number
@@ -334,7 +324,7 @@ def find_next_season_path(ordered: list[db.LibraryRow], i: int) -> str | None:
     return None
 
 
-def find_prev_show_path(ordered: list[db.LibraryRow], i: int) -> str | None:
+def find_prev_show_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
     """First episode of the previous show in the library."""
     cur_show = ordered[i].plex_show_title
     if cur_show is None:
@@ -350,7 +340,7 @@ def find_prev_show_path(ordered: list[db.LibraryRow], i: int) -> str | None:
     return ordered[j].path
 
 
-def find_next_show_path(ordered: list[db.LibraryRow], i: int) -> str | None:
+def find_next_show_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
     """First episode of the next show in the library."""
     cur_show = ordered[i].plex_show_title
     if cur_show is None:
@@ -365,13 +355,13 @@ def find_next_show_path(ordered: list[db.LibraryRow], i: int) -> str | None:
 
 def annotate_tracks(
     media_path: str,
-    audio: list[db.AudioTrackRow],
-    subtitle: list[db.SubtitleTrackRow],
+    audio: list[models.AudioTrack],
+    subtitle: list[fmt.SubtitleTrack],
 ) -> tuple[list[dict], list[dict]]:
     """Build template-facing audio/subtitle dicts with display fields attached."""
     audio_view = [
         {
-            **dataclasses.asdict(t),
+            **t.model_dump(),
             "details": fmt.format_audio_details(t),
             "lang_display": fmt.lang_name(t.language),
             "title_display": fmt.clean_audio_title(t.title, t.language),
@@ -381,7 +371,8 @@ def annotate_tracks(
     file_exts = fmt.subtitle_file_exts(media_path, subtitle)
     subtitle_view = [
         {
-            **dataclasses.asdict(t),
+            **t.model_dump(),
+            "subtitle_path": getattr(t, "subtitle_path", None),
             "lang_display": fmt.lang_name(t.language),
             "file_ext": ext,
         }
@@ -425,8 +416,8 @@ class InfoResponse(BaseModel):
     duration: float | None = None
     video: VideoInfo
     aspect: AspectInfo
-    audio: list[db.AudioTrackRow]
-    subtitles: list[db.SubtitleTrackRow]
+    audio: list[models.AudioTrack]
+    subtitles: list[models.SubtitleTrackInternal | models.SubtitleTrackExternal]
 
 
 class InfoByContentIdResponse(InfoResponse):
@@ -434,10 +425,11 @@ class InfoByContentIdResponse(InfoResponse):
     plex_files: list[str]
 
 
-def build_info(mf: db.VideoFileRow) -> InfoResponse:
+async def build_info(mf: models.VideoFile) -> InfoResponse:
     path = mf.path
-    mi = db.get_mediainfo(path)
-    ar = db.get_ardetector(path)
+    mi = await queries.get_mediainfo(path)
+    ar = await queries.get_ardetector(path)
+    internal_subs, external_subs = await queries.get_subtitle_tracks(path)
     samples_raw = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
     samples = [AspectSample(**s) for s in samples_raw] if samples_raw else None
     return InfoResponse(
@@ -463,8 +455,8 @@ def build_info(mf: db.VideoFileRow) -> InfoResponse:
             widest=ar.aspect_widest if ar else None,
             samples=samples,
         ),
-        audio=db.get_audio_tracks(path),
-        subtitles=db.get_subtitle_tracks(path),
+        audio=await queries.get_audio_tracks(path),
+        subtitles=[*internal_subs, *external_subs],
     )
 
 
@@ -526,25 +518,26 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     if lib is None:
         raise HTTPException(status_code=404, detail=f"no library {slug!r}")
 
+    all_rows = await library_rows_for(lib)
     raw_rows = sorted(
-        (r for r in library_rows_for(lib) if not is_extra(r.path)),
+        (r for r in all_rows if not is_extra(r.path)),
         key=library_sort_key,
     )
-    audio_by_path, sub_by_path = library_tracks_for(lib)
+    audio_by_path, sub_by_path = await library_tracks_for(lib)
 
     config = get_config()
     machine_id = await plex.get_machine_identifier()
-    server_url = config.plex.url or plex.get_server_url()
+    server_url = config.plex.url or await plex.get_server_url()
     tautulli_url = config.tautulli.url
-    bazarr_url = config.bazarr.url
+    bazarr = config.bazarr
     radarr_url = config.radarr.url
     sonarr_url = config.sonarr.url
 
-    # Batch the *arr lookups into one query each instead of 4 per row.
-    bazarr_movies = db.all_bazarr_movies_by_local_path() if bazarr_url else {}
-    bazarr_series = db.all_bazarr_series_by_local_folder() if bazarr_url else {}
-    radarr_movies = db.all_radarr_movies_by_local_path() if radarr_url else {}
-    sonarr_series = db.all_sonarr_series_by_local_folder() if sonarr_url else {}
+    # Radarr movie overlay (tmdb + radarr id) keyed by local path; one query
+    # per library root. Series + Sonarr slug come pre-joined on each row.
+    movies: dict[str, models.Movie] = {}
+    for p in lib["paths"]:
+        movies.update(await queries.LibraryRow.movies_for_prefix(p))
 
     rows: list[dict] = []
     is_tv = False
@@ -552,6 +545,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
         path = r.path
         audio = audio_by_path.get(path, [])
         subs = sub_by_path.get(path, [])
+        movie = movies.get(path)
         aspect_set = json.loads(r.aspect_samples) if r.aspect_samples else None
         aspects, aspects_truncated = fmt.format_aspects_for_row(
             aspect_set,
@@ -595,23 +589,17 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
                     r.plex_rating_key,
                 ),
                 "bazarr_url": (
-                    fmt.bazarr_movie_deeplink(bazarr_url, bazarr_movies[path])
-                    if path in bazarr_movies
-                    else fmt.bazarr_series_deeplink(
-                        bazarr_url,
-                        ancestor_match(path, bazarr_series),
-                    )
-                    if bazarr_url
+                    fmt.bazarr_movie_deeplink(bazarr.url, movie.id)
+                    if bazarr.url and bazarr.link_movies and movie is not None
+                    else fmt.bazarr_series_deeplink(bazarr.url, r.series_id)
+                    if bazarr.url and bazarr.link_series and r.series_id is not None
                     else None
                 ),
                 "radarr_url": fmt.radarr_deeplink(
                     radarr_url,
-                    radarr_movies.get(path),
+                    movie.tmdb_id if movie else None,
                 ),
-                "sonarr_url": fmt.sonarr_deeplink(
-                    sonarr_url,
-                    ancestor_match(path, sonarr_series),
-                ),
+                "sonarr_url": fmt.sonarr_deeplink(sonarr_url, r.series_slug),
             },
         )
     # TV libraries: roll episodes up under show + season header rows.
@@ -660,7 +648,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
 
 @app.get("/item", response_class=HTMLResponse, include_in_schema=False)
 async def item_detail(request: Request, path: str) -> HTMLResponse:
-    mf = db.get(path)
+    mf = await queries.get(path)
     if mf is None:
         raise HTTPException(status_code=404, detail=f"no record for {path}")
     lib = next(
@@ -678,7 +666,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
         # Use the same sort as the library page so Prev/Next feels
         # consistent. Hops over bonus features (extras).
         ordered = sorted(
-            (r for r in library_rows_for(lib) if not is_extra(r.path)),
+            (r for r in await library_rows_for(lib) if not is_extra(r.path)),
             key=library_sort_key,
         )
         paths = [r.path for r in ordered]
@@ -697,16 +685,17 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             prev_show_path = find_prev_show_path(ordered, i)
             next_show_path = find_next_show_path(ordered, i)
 
-    audio_rows = db.get_audio_tracks(path)
-    subtitle_rows = db.get_subtitle_tracks(path)
+    audio_rows = await queries.get_audio_tracks(path)
+    internal_subs, external_subs = await queries.get_subtitle_tracks(path)
+    subtitle_rows = [*internal_subs, *external_subs]
     audio_view, subtitle_view = annotate_tracks(path, audio_rows, subtitle_rows)
-    plex_item = db.get_plex_item_by_local_path(path)
-    mi = db.get_mediainfo(path)
-    ar = db.get_ardetector(path)
+    plex_item = await queries.get_plex_item_by_local_path(path)
+    mi = await queries.get_mediainfo(path)
+    ar = await queries.get_ardetector(path)
     aspect_set = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
     config = get_config()
     machine_id = await plex.get_machine_identifier()
-    server_url = config.plex.url or plex.get_server_url()
+    server_url = config.plex.url or await plex.get_server_url()
     rating_key = plex_item.rating_key if plex_item else None
 
     # Bonus features: siblings of the main movie that live in an Extras/
@@ -716,17 +705,19 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     if not is_extra(path):
         parent_prefix = str(Path(path).parent) + "/"
         extra_paths = sorted(
-            p for p in db.list_paths() if p.startswith(parent_prefix) and is_extra(p)
+            p
+            for p in await queries.list_paths()
+            if p.startswith(parent_prefix) and is_extra(p)
         )
         for ep in extra_paths:
-            emf = db.get(ep)
+            emf = await queries.get(ep)
             if emf is None:
                 continue
-            emi = db.get_mediainfo(ep)
-            ear = db.get_ardetector(ep)
-            ea = db.get_audio_tracks(ep)
-            es = db.get_subtitle_tracks(ep)
-            ea_view, es_view = annotate_tracks(ep, ea, es)
+            emi = await queries.get_mediainfo(ep)
+            ear = await queries.get_ardetector(ep)
+            ea = await queries.get_audio_tracks(ep)
+            ei, ex = await queries.get_subtitle_tracks(ep)
+            ea_view, es_view = annotate_tracks(ep, ea, [*ei, *ex])
             eset = (
                 json.loads(ear.aspect_samples) if ear and ear.aspect_samples else None
             )
@@ -761,9 +752,9 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             ),
             "plex_url": fmt.plex_deeplink(server_url, machine_id, rating_key),
             "tautulli_url": fmt.tautulli_deeplink(config.tautulli.url, rating_key),
-            "bazarr_url": bazarr_url_for(config.bazarr.url, path),
-            "radarr_url": radarr_url_for(config.radarr.url, path),
-            "sonarr_url": sonarr_url_for(config.sonarr.url, path),
+            "bazarr_url": await bazarr_url_for(path),
+            "radarr_url": await radarr_url_for(config.radarr.url, path),
+            "sonarr_url": await sonarr_url_for(config.sonarr.url, path),
             "extras": extras,
             "libraries": libraries(),
             "current_slug": lib["slug"] if lib else "",
@@ -781,9 +772,9 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
 
 
 def detail_view(
-    mf: db.VideoFileRow,
-    mi: db.MediainfoRow | None,
-    ar: db.ArdetectorRow | None,
+    mf: models.VideoFile,
+    mi: models.Mediainfo | None,
+    ar: models.Ardetector | None,
 ) -> dict:
     """Flatten media_file + mediainfo + ardetector into one dict the
     detail template treats as the legacy `mf` object. NULL probe rows
@@ -829,10 +820,10 @@ async def get_info_by_content_id(content_id: str) -> InfoByContentIdResponse:
         )
     path_map = get_config().plex.path_map
     for f in plex_files:
-        row = db.get_by_remote_path(f, path_map)
+        row = await queries.get_by_remote_path(f, path_map)
         if row is not None:
             return InfoByContentIdResponse(
-                **build_info(row).model_dump(),
+                **(await build_info(row)).model_dump(),
                 plex_content_id=content_id,
                 plex_files=plex_files,
             )
@@ -845,10 +836,10 @@ async def get_info_by_content_id(content_id: str) -> InfoByContentIdResponse:
 @api.get("/info/{file_path:path}")
 async def get_info(file_path: str) -> InfoResponse:
     path = "/" + file_path
-    row = db.get(path)
+    row = await queries.get(path)
     if row is None:
         raise HTTPException(status_code=404, detail=f"no record for {path}")
-    return build_info(row)
+    return await build_info(row)
 
 
 @api.post("/webhook")
@@ -857,7 +848,7 @@ async def webhook(form: Annotated[plex.PlexWebhookForm, Form()]) -> Response:
     payload = form.payload
 
     if payload.event == "library.new":
-        scanner.enqueue(ScanRequest())
+        await scanner.enqueue(ScanRequest())
 
     return Response(status_code=204)
 
@@ -872,33 +863,33 @@ def lookup_path(file_path: str) -> Path:
 @api.post("/task/scan")
 async def task_scan() -> Response:
     """Incremental library sweep: pick up new files, reprobe changed ones."""
-    scanner.enqueue(ScanRequest())
+    await scanner.enqueue(ScanRequest())
     return Response(status_code=202)
 
 
 @api.post("/task/refresh")
 async def task_refresh() -> Response:
     """Force-refresh mediainfo on every file. AR cache preserved."""
-    scanner.enqueue(ScanRequest(refresh=True))
+    await scanner.enqueue(ScanRequest(refresh=True))
     return Response(status_code=202)
 
 
 @api.post("/task/refresh/{file_path:path}")
 async def task_refresh_path(file_path: str) -> Response:
-    scanner.enqueue(ScanRequest(lookup_path(file_path), refresh=True))
+    await scanner.enqueue(ScanRequest(lookup_path(file_path), refresh=True))
     return Response(status_code=202)
 
 
 @api.post("/task/analyze")
 async def task_analyze() -> Response:
     """Force-reprobe AR and mediainfo on every file. Slow."""
-    scanner.enqueue(ScanRequest(analyze=True))
+    await scanner.enqueue(ScanRequest(analyze=True))
     return Response(status_code=202)
 
 
 @api.post("/task/analyze/{file_path:path}")
 async def task_analyze_path(file_path: str) -> Response:
-    scanner.enqueue(ScanRequest(lookup_path(file_path), analyze=True))
+    await scanner.enqueue(ScanRequest(lookup_path(file_path), analyze=True))
     return Response(status_code=202)
 
 

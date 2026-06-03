@@ -5,7 +5,7 @@ Auth flow:
     2. User opens the URL, logs in at plex.tv, clicks "Allow".
     3. usharr polls the PIN until ``authToken`` is set, then discovers a
        reachable server via /api/v2/resources and stores ``token`` +
-       ``server_url`` + ``server_name`` + ``client_id`` in the kv table.
+       ``server_url`` + ``server_name`` + ``client_id`` in the plex_auth row.
 """
 
 import asyncio
@@ -24,19 +24,13 @@ from pydantic import (
     model_validator,
 )
 
-from usharr import db
+from usharr.models import PlexAuth
 
 logger = logging.getLogger(__name__)
 
 PLEX_TV = "https://plex.tv"
 PRODUCT = "usharr"
 VERSION = "0.1.0"
-
-K_CLIENT_ID = "plex_client_id"
-K_TOKEN = "plex_token"
-K_SERVER_URL = "plex_server_url"
-K_SERVER_NAME = "plex_server_name"
-K_MACHINE_ID = "plex_machine_id"
 
 
 class PlexError(RuntimeError):
@@ -133,45 +127,51 @@ def parse[T: BaseModel](model: type[T], payload: bytes, endpoint: str) -> T:
         raise PlexError(msg) from exc
 
 
-# --- kv helpers -----------------------------------------------------------
+# --- auth state (single-row plex_auth) ------------------------------------
 
 
-def get_or_create_client_id() -> str:
-    existing = db.kv_get(K_CLIENT_ID)
-    if existing:
-        return existing
+async def _auth_row() -> PlexAuth:
+    row = await PlexAuth.objects.get_or_none(id=1)
+    if row is None:
+        row = await PlexAuth.objects.create(id=1)
+    return row
+
+
+async def get_or_create_client_id() -> str:
+    row = await _auth_row()
+    if row.client_id:
+        return row.client_id
     client_id = str(uuid.uuid4())
-    db.kv_set(K_CLIENT_ID, client_id)
+    await PlexAuth.objects.filter(id=1).update(client_id=client_id)
     return client_id
 
 
-def save_auth(token: str, server_url: str, server_name: str) -> None:
-    db.kv_set(K_TOKEN, token)
-    db.kv_set(K_SERVER_URL, server_url)
-    db.kv_set(K_SERVER_NAME, server_name)
+async def save_auth(token: str, server_url: str, server_name: str) -> None:
+    await _auth_row()
+    await PlexAuth.objects.filter(id=1).update(
+        token=token, server_url=server_url, server_name=server_name
+    )
 
 
-def clear_auth() -> None:
-    db.kv_set(K_TOKEN, None)
-    db.kv_set(K_SERVER_URL, None)
-    db.kv_set(K_SERVER_NAME, None)
-    db.kv_set(K_MACHINE_ID, None)
+async def clear_auth() -> None:
+    await PlexAuth.objects.filter(id=1).update(
+        token=None, server_url=None, server_name=None, machine_id=None
+    )
 
 
-def load_auth() -> tuple[str, str, str]:
+async def load_auth() -> tuple[str, str, str]:
     """Return (token, server_url, server_name) or raise PlexNotLinkedError."""
-    token = db.kv_get(K_TOKEN)
-    url = db.kv_get(K_SERVER_URL)
-    name = db.kv_get(K_SERVER_NAME)
-    if not token or not url:
+    row = await PlexAuth.objects.get_or_none(id=1)
+    if not row or not row.token or not row.server_url:
         msg = "Plex is not linked. Run `usharr auth`."
         raise PlexNotLinkedError(msg)
-    return token, url, name or ""
+    return row.token, row.server_url, row.server_name or ""
 
 
-def get_server_url() -> str | None:
+async def get_server_url() -> str | None:
     """Return the stored Plex server URL, or None if unlinked."""
-    return db.kv_get(K_SERVER_URL)
+    row = await PlexAuth.objects.get_or_none(id=1)
+    return row.server_url if row else None
 
 
 def headers(client_id: str, token: str | None = None) -> dict[str, str]:
@@ -309,14 +309,14 @@ async def account_email(client_id: str, token: str) -> str:
 
 async def get_machine_identifier() -> str | None:
     """Cached fetch of the Plex server's machineIdentifier (for deep-links)."""
-    existing = db.kv_get(K_MACHINE_ID)
-    if existing:
-        return existing
+    row = await PlexAuth.objects.get_or_none(id=1)
+    if row and row.machine_id:
+        return row.machine_id
     try:
-        token, server_url, _ = load_auth()
+        token, server_url, _ = await load_auth()
     except PlexNotLinkedError:
         return None
-    client_id = get_or_create_client_id()
+    client_id = await get_or_create_client_id()
     endpoint = f"{server_url.rstrip('/')}/identity"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -333,7 +333,9 @@ async def get_machine_identifier() -> str | None:
         return None
     if not resp.container.machine_identifier:
         return None
-    db.kv_set(K_MACHINE_ID, resp.container.machine_identifier)
+    await PlexAuth.objects.filter(id=1).update(
+        machine_id=resp.container.machine_identifier
+    )
     return resp.container.machine_identifier
 
 
@@ -342,8 +344,8 @@ async def get_machine_identifier() -> str | None:
 
 async def resolve_rating_key(rating_key: str) -> list[str]:
     """Return all Plex-side file paths for an item's Parts."""
-    token, server_url, _ = load_auth()
-    client_id = get_or_create_client_id()
+    token, server_url, _ = await load_auth()
+    client_id = await get_or_create_client_id()
     endpoint = f"{server_url.rstrip('/')}/library/metadata/{rating_key}"
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:

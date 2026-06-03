@@ -16,7 +16,7 @@ Paths are scanned recursively for files with a video extension (`.avi`, `.iso`, 
 
 ### Integrations and Path Matching
 
-The configuration file allows for integrations with Plex, Bazarr, Radarr, Sonarr, and Tautulli. All of these except for Tautulli require Usharr to match the paths it discovers against the paths reported to it by the integrations. If these paths are not the same for any given integration, you must configure `path_map` for that integration. e.g.
+The configuration file allows for integrations with Plex, Bazarr, Radarr, Sonarr, and Tautulli. Plex, Radarr, and Sonarr require Usharr to match the paths it discovers against the paths reported to it by the integrations; if these paths are not the same for any given integration, you must configure `path_map` for that integration. e.g.
 
 ```yaml
 plex:
@@ -26,6 +26,8 @@ plex:
 ```
 
 This would allow Usharr to match `/media/Movies/Brazil (1985)/Brazil (1985).mkv` (as exposed to Usharr) to `/mnt/Movies/Brazil (1985)/Brazil (1985).mkv` (as exposed to Plex).
+
+Tautulli and Bazarr need no path matching: Tautulli links by Plex rating key, and Bazarr links reuse the Radarr movie id / Sonarr series id Usharr already holds (so Bazarr needs only a `url` plus `link_movies` / `link_series` flags, no API key).
 
 ## Web UI
 

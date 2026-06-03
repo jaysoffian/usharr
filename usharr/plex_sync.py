@@ -10,7 +10,7 @@ from pydantic import (
     ValidationError,
 )
 
-from usharr import db, plex
+from usharr import plex, queries
 from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -52,12 +52,12 @@ class LibMetadata(Model):
     index: int | None = None
     media: list[LibMedia] = Field(default_factory=list, alias="Media")
 
-    def upsert(self, path_map: dict[str, str]) -> None:
+    async def upsert(self, path_map: dict[str, str]) -> None:
         remote_path = next(
             (p.file for m in self.media for p in m.parts if p.file),
             None,
         )
-        db.upsert_plex_item(
+        await queries.upsert_plex_item(
             rating_key=self.rating_key,
             item_type=self.type or "movie",
             title=self.title or None,
@@ -79,8 +79,8 @@ class LibResponse(Model):
 
 
 async def get_json[T: Model](model: type[T], url: str) -> T:
-    token, _, _ = plex.load_auth()
-    client_id = plex.get_or_create_client_id()
+    token, _, _ = await plex.load_auth()
+    client_id = await plex.get_or_create_client_id()
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(url, headers=plex.headers(client_id, token))
     if r.status_code != 200:
@@ -97,7 +97,7 @@ async def sync() -> None:
     """Walk sections and upsert every movie + episode into plex_item."""
     try:
         try:
-            _, server_url, _ = plex.load_auth()
+            _, server_url, _ = await plex.load_auth()
         except plex.PlexNotLinkedError:
             logger.info("plex_sync: not linked; skipping")
             return
@@ -129,12 +129,12 @@ async def sync() -> None:
                 if not item.rating_key:
                     continue
                 seen.add(item.rating_key)
-                item.upsert(path_map)
+                await item.upsert(path_map)
                 upserted += 1
 
-        existing = db.list_plex_rating_keys()
+        existing = await queries.list_plex_rating_keys()
         stale = sorted(existing - seen)
-        removed = db.delete_plex_rating_keys(stale) if stale else 0
+        removed = await queries.delete_plex_rating_keys(stale) if stale else 0
         logger.info("plex_sync: upserted=%d removed=%d", upserted, removed)
     except Exception:
         logger.exception("plex_sync errored")

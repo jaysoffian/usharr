@@ -1,7 +1,6 @@
 """Container/codec/track extraction via pymediainfo."""
 
 import asyncio
-import dataclasses
 import json
 import logging
 import re
@@ -12,7 +11,7 @@ from pathlib import Path
 
 from pymediainfo import MediaInfo
 
-from usharr.db import AudioTrackRow, MediainfoRow, SubtitleTrackRow
+from usharr import models
 from usharr.langs import norm_lang
 
 logger = logging.getLogger(__name__)
@@ -537,58 +536,62 @@ async def extract(path: Path) -> MediaInfoResult:
 # --- dict adapters for db layer -------------------------------------------
 
 
-def to_audio_row(a: AudioTrack) -> AudioTrackRow:
-    return AudioTrackRow(
-        idx=a.idx,
-        codec=a.codec,
-        channels=a.channels,
-        layout=a.layout,
-        language=a.language,
-        title=a.title,
-        is_default=a.is_default,
-        is_forced=a.is_forced,
-        format=a.format,
-        commercial_name=a.commercial_name,
-        bit_rate=a.bit_rate,
-        bit_rate_mode=a.bit_rate_mode,
-        sample_rate=a.sample_rate,
-        bit_depth=a.bit_depth,
-        compression_mode=a.compression_mode,
+def to_audio_row(video_path: str, a: AudioTrack) -> models.AudioTrack:
+    return models.AudioTrack.model_validate(
+        {
+            "video_path": video_path,
+            "idx": a.idx,
+            "codec": a.codec,
+            "channels": a.channels,
+            "layout": a.layout,
+            "language": a.language,
+            "title": a.title,
+            "is_default": a.is_default,
+            "is_forced": a.is_forced,
+            "format": a.format,
+            "commercial_name": a.commercial_name,
+            "bit_rate": a.bit_rate,
+            "bit_rate_mode": a.bit_rate_mode,
+            "sample_rate": a.sample_rate,
+            "bit_depth": a.bit_depth,
+            "compression_mode": a.compression_mode,
+        }
     )
 
 
-def to_internal_sub_row(s: SubtitleTrack) -> SubtitleTrackRow:
-    return SubtitleTrackRow(
-        idx=s.idx,
-        subtitle_path=None,
-        codec=s.codec,
-        language=s.language,
-        title=s.title,
-        is_default=s.is_default,
-        is_forced=s.is_forced,
-        is_sdh=s.is_sdh,
+def to_internal_sub_row(
+    video_path: str, s: SubtitleTrack
+) -> models.SubtitleTrackInternal:
+    return models.SubtitleTrackInternal.model_validate(
+        {
+            "video_path": video_path,
+            "idx": s.idx,
+            "codec": s.codec,
+            "language": s.language,
+            "title": s.title,
+            "is_default": s.is_default,
+            "is_forced": s.is_forced,
+            "is_sdh": s.is_sdh,
+        }
     )
 
 
-def to_mediainfo_row(path: Path, mi: MediaInfoResult) -> MediainfoRow:
-    base = MediainfoRow(
-        video_path=str(path),
-        container=mi.container,
-        duration=mi.duration,
-    )
-    if mi.video is None:
-        return base
+def to_mediainfo_row(path: Path, mi: MediaInfoResult) -> models.Mediainfo:
     v = mi.video
-    return dataclasses.replace(
-        base,
-        video_codec=v.codec,
-        video_profile=v.profile,
-        video_width=v.width or None,
-        video_height=v.height or None,
-        video_bit_depth=v.bit_depth,
-        video_hdr=v.hdr,
-        video_hdr_format=v.hdr_format,
-        video_frame_rate=v.frame_rate,
-        video_bit_rate=v.bit_rate,
-        video_max_bit_rate=v.max_bit_rate,
+    return models.Mediainfo.model_validate(
+        {
+            "video_path": str(path),
+            "container": mi.container,
+            "duration": mi.duration,
+            "video_codec": v.codec if v else None,
+            "video_profile": v.profile if v else None,
+            "video_width": (v.width or None) if v else None,
+            "video_height": (v.height or None) if v else None,
+            "video_bit_depth": v.bit_depth if v else None,
+            "video_hdr": v.hdr if v else None,
+            "video_hdr_format": v.hdr_format if v else None,
+            "video_frame_rate": v.frame_rate if v else None,
+            "video_bit_rate": v.bit_rate if v else None,
+            "video_max_bit_rate": v.max_bit_rate if v else None,
+        }
     )

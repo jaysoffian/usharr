@@ -9,7 +9,7 @@ import logging
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from usharr import db
+from usharr import queries
 from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -60,15 +60,15 @@ async def sync() -> None:
         for m in movies:
             seen.add(m.id)
             file_path = m.movie_file.path if m.movie_file else None
-            db.upsert_radarr_movie(
+            await queries.upsert_radarr_movie(
                 movie_id=m.id,
                 tmdb_id=m.tmdb_id,
                 remote_path=file_path or None,
                 path_map=r.path_map,
             )
 
-        stale = sorted(db.list_radarr_movie_ids() - seen)
-        removed = db.delete_radarr_movies(stale) if stale else 0
+        stale = sorted(await queries.list_radarr_movie_ids() - seen)
+        removed = await queries.delete_radarr_movies(stale) if stale else 0
         logger.info("radarr_sync: movies=%d removed=%d", len(movies), removed)
     except Exception:
         logger.exception("radarr_sync errored")
