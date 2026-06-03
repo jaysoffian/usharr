@@ -31,6 +31,18 @@ hooks = [
 ]
 
 [[repos]]
+repo = "local"
+hooks = [
+  {
+    id = "ty-check",
+    name = "ty check",
+    entry = "mise x -- uv run ty check",
+    language = "system",
+    types = ["python"],
+  }
+]
+
+[[repos]]
 repo = "https://github.com/RobertCraigie/pyright-python"
 rev = "v1.1.410"
 hooks = [

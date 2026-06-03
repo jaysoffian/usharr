@@ -8,7 +8,7 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, FastAPI, Form, HTTPException, Request, Response
@@ -77,7 +77,10 @@ here = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=here / "static"), name="static")
 templates = Jinja2Templates(directory=here / "templates")
 templates.env.filters["pathencode"] = lambda s: quote(s or "", safe="/")
-templates.env.globals["resolution_bucket"] = fmt.resolution_bucket
+# jinja2 leaves Environment.globals' value type inferred from its defaults, so
+# assign our helpers through a widened reference.
+jinja_globals: dict[str, Any] = templates.env.globals
+jinja_globals["resolution_bucket"] = fmt.resolution_bucket
 
 
 def static_url(filename: str) -> str:
@@ -91,7 +94,7 @@ def static_url(filename: str) -> str:
     return f"/static/{filename}?v={v}"
 
 
-templates.env.globals["static_url"] = static_url
+jinja_globals["static_url"] = static_url
 
 
 def slug(name: str) -> str:

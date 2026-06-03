@@ -18,7 +18,9 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "ty>=0.0.42",
+]
 
 [project.scripts]
 usharr = "usharr.cli:main"
