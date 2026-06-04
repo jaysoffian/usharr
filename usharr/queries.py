@@ -251,10 +251,11 @@ async def replace_external_subtitles(
 @dataclass(frozen=True, slots=True)
 class LibraryRow:
     """One library-grid file: its video_file plus the optional mediainfo /
-    ardetector / plex_item overlays and the Series whose folder contains it. The
-    properties expose the null-safe flat fields the grid, sort key, and
-    detail-page navigation read; the detail page and /api/info read the models
-    directly. Owns the grid's read queries.
+    ardetector / plex_item overlays and the Series whose folder contains it.
+    Holds the source models; the accessors expose only the identity + plex
+    show/season/episode ordering keys that sorting and prev/next navigation
+    need. Presentation (the grid's formatted columns + deep-links) is built
+    from the models in ``usharr.views``. Owns the grid's read queries.
     """
 
     video: VideoFile
@@ -268,44 +269,8 @@ class LibraryRow:
         return self.video.path
 
     @property
-    def mediainfo_error(self) -> str | None:
-        return self.mediainfo.error if self.mediainfo else None
-
-    @property
-    def ardetector_error(self) -> str | None:
-        return self.ardetector.error if self.ardetector else None
-
-    @property
-    def video_width(self) -> int | None:
-        return self.mediainfo.video_width if self.mediainfo else None
-
-    @property
-    def video_height(self) -> int | None:
-        return self.mediainfo.video_height if self.mediainfo else None
-
-    @property
-    def video_hdr(self) -> str | None:
-        return self.mediainfo.video_hdr if self.mediainfo else None
-
-    @property
-    def aspect_primary(self) -> float | None:
-        return self.ardetector.aspect_primary if self.ardetector else None
-
-    @property
-    def aspect_samples(self) -> str | None:
-        return self.ardetector.aspect_samples if self.ardetector else None
-
-    @property
-    def plex_rating_key(self) -> str | None:
-        return self.plex.rating_key if self.plex else None
-
-    @property
     def plex_title(self) -> str | None:
         return self.plex.title if self.plex else None
-
-    @property
-    def plex_year(self) -> int | None:
-        return self.plex.year if self.plex else None
 
     @property
     def plex_show_title(self) -> str | None:
@@ -318,14 +283,6 @@ class LibraryRow:
     @property
     def plex_episode_number(self) -> int | None:
         return self.plex.episode_number if self.plex else None
-
-    @property
-    def series_id(self) -> int | None:
-        return self.series.id if self.series else None
-
-    @property
-    def series_slug(self) -> str | None:
-        return self.series.title_slug if self.series else None
 
     @staticmethod
     def _series_for(path: str, by_folder: dict[str, Series]) -> Series | None:

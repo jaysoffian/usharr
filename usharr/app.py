@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from oxyde_admin import FastAPIAdmin
 from pydantic import BaseModel, Field
 
-from usharr import database, models, plex, probers, queries
+from usharr import database, models, plex, probers, queries, views
 from usharr import format as fmt
 from usharr.config import get_config
 from usharr.scanner import ScanRequest, scanner
@@ -228,74 +228,6 @@ async def sonarr_url_for(sonarr_base: str | None, local_path: str) -> str | None
         return None
     series = await queries.series_for_local_path(local_path)
     return fmt.sonarr_deeplink(sonarr_base, series.title_slug if series else None)
-
-
-def group_tv_rows(episode_rows: list[dict]) -> list[dict]:
-    """Insert show + season header rows into a sorted episode list.
-
-    Input rows are already ordered by show title → season → episode
-    (see ``library_sort_key``). A show header is emitted when
-    ``plex_show_title`` changes; a season header is emitted when
-    ``plex_season_number`` changes within the show. Episodes are
-    retitled ``"<N>. <Episode Title>"`` so the season header carries
-    the season context.
-
-    Non-episode rows (mixed-in movies) pass through untouched.
-    """
-    out: list[dict] = []
-    current_show: str | None = None
-    current_season: int | None = None
-    show_header_idx: dict[str, int] = {}
-    show_seasons: dict[str, set] = {}
-    show_ep_count: dict[str, int] = {}
-    for r in episode_rows:
-        if r.get("kind") != "episode":
-            out.append(r)
-            continue
-        show = r.get("plex_show_title")
-        season = r.get("plex_season_number")
-        if show and show != current_show:
-            current_show = show
-            current_season = None
-            out.append(
-                {
-                    "kind": "show",
-                    "display_title": show,
-                    "show_title": show,
-                    "plex_year": r.get("plex_year"),
-                },
-            )
-            show_header_idx[show] = len(out) - 1
-            show_seasons[show] = set()
-            show_ep_count[show] = 0
-        if show and season != current_season:
-            current_season = season
-            label = "Specials" if season in (None, 0) else f"Season {season}"
-            out.append(
-                {
-                    "kind": "season",
-                    "display_title": label,
-                    "show_title": show,
-                    "season_number": season if season is not None else 0,
-                },
-            )
-            show_seasons[show].add(season)
-        # Rewrite episode title to drop the show prefix (the header
-        # above already says the show name) and prefix the episode
-        # number so "1. Pilot" reads naturally under "Season 1".
-        ep_num = r.get("plex_episode_number")
-        ep_title = r.get("plex_title") or fmt.format_display_title(
-            r["path"], None, None
-        )
-        r["display_title"] = f"{ep_num}. {ep_title}" if ep_num is not None else ep_title
-        out.append(r)
-        if show:
-            show_ep_count[show] += 1
-    # Second pass: fill season/episode counts into the show headers.
-    for show, idx in show_header_idx.items():
-        out[idx]["season_count"] = len(show_seasons[show])
-        out[idx]["episode_count"] = show_ep_count[show]
-    return out
 
 
 def find_prev_season_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
@@ -531,10 +463,6 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     config = get_config()
     machine_id = await plex.get_machine_identifier()
     server_url = config.plex.url or await plex.get_server_url()
-    tautulli_url = config.tautulli.url
-    bazarr = config.bazarr
-    radarr_url = config.radarr.url
-    sonarr_url = config.sonarr.url
 
     # Radarr movie overlay (tmdb + radarr id) keyed by local path; one query
     # per library root. Series + Sonarr slug come pre-joined on each row.
@@ -542,75 +470,25 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     for p in lib["paths"]:
         movies.update(await queries.LibraryRow.movies_for_prefix(p))
 
-    rows: list[dict] = []
-    is_tv = False
-    for r in raw_rows:
-        path = r.path
-        audio = audio_by_path.get(path, [])
-        subs = sub_by_path.get(path, [])
-        movie = movies.get(path)
-        aspect_set = json.loads(r.aspect_samples) if r.aspect_samples else None
-        aspects, aspects_truncated = fmt.format_aspects_for_row(
-            aspect_set,
-            r.aspect_primary,
+    rows = [
+        views.render_row(
+            r,
+            audio=audio_by_path.get(r.path, []),
+            subs=sub_by_path.get(r.path, []),
+            movie=movies.get(r.path),
+            config=config,
+            server_url=server_url,
+            machine_id=machine_id,
         )
-        is_episode = r.plex_season_number is not None
-        if is_episode:
-            is_tv = True
-        rows.append(
-            {
-                "kind": "episode" if is_episode else "movie",
-                "path": path,
-                "plex_title": r.plex_title,
-                "plex_show_title": r.plex_show_title,
-                "plex_season_number": r.plex_season_number,
-                "plex_episode_number": r.plex_episode_number,
-                "display_title": fmt.format_display_title(
-                    path,
-                    r.plex_title,
-                    r.plex_show_title,
-                ),
-                "plex_year": r.plex_year or fmt.year_from_path(path),
-                "edition": fmt.edition_from_path(path),
-                "video_summary": fmt.format_video(
-                    r.video_width,
-                    r.video_height,
-                    r.video_hdr,
-                ),
-                "audio_summary": fmt.format_audio(audio),
-                "sub_chip": fmt.format_sub_chip(subs),
-                "has_error": bool(r.mediainfo_error or r.ardetector_error),
-                "aspects": aspects,
-                "aspects_truncated": aspects_truncated,
-                "plex_url": fmt.plex_deeplink(
-                    server_url,
-                    machine_id,
-                    r.plex_rating_key,
-                ),
-                "tautulli_url": fmt.tautulli_deeplink(
-                    tautulli_url,
-                    r.plex_rating_key,
-                ),
-                "bazarr_url": (
-                    fmt.bazarr_movie_deeplink(bazarr.url, movie.id)
-                    if bazarr.url and bazarr.link_movies and movie is not None
-                    else fmt.bazarr_series_deeplink(bazarr.url, r.series_id)
-                    if bazarr.url and bazarr.link_series and r.series_id is not None
-                    else None
-                ),
-                "radarr_url": fmt.radarr_deeplink(
-                    radarr_url,
-                    movie.tmdb_id if movie else None,
-                ),
-                "sonarr_url": fmt.sonarr_deeplink(sonarr_url, r.series_slug),
-            },
-        )
+        for r in raw_rows
+    ]
+    is_tv = any(row["kind"] == "episode" for row in rows)
     # TV libraries: roll episodes up under show + season header rows.
     # Avoids a 1700-row wall for shows with many seasons. Grouping is
     # purely visual — no click-to-expand, no nesting — so Cmd-F still
     # works and the rail still jumps by show-title letter.
     if is_tv:
-        rows = group_tv_rows(rows)
+        rows = views.group_tv_rows(rows)
         titles = sum(1 for r in rows if r.get("kind") == "show")
         episodes = sum(1 for r in rows if r.get("kind") == "episode")
     else:
