@@ -168,36 +168,6 @@ def is_extra(path: str) -> bool:
     return any(part.lower() in EXTRAS_DIRS for part in Path(path).parent.parts)
 
 
-JUMP_LETTERS: tuple[str, ...] = ("#", *(chr(c) for c in range(ord("A"), ord("Z") + 1)))
-
-
-def jump_letter(display_title: str) -> str:
-    norm = fmt.sort_normalize(display_title)
-    if not norm:
-        return "#"
-    c = norm[0]
-    return c.upper() if c.isalpha() else "#"
-
-
-def library_sort_key(r: queries.LibraryRow) -> tuple:
-    """Library sort: show/title normalized + article-stripped, then S/E.
-
-    Episodes group by show (via plex_show_title) and sort by season then
-    episode within. Movies and standalone titles sort by title.
-    """
-    primary = (
-        r.plex_show_title
-        or r.plex_title
-        or fmt.format_display_title(r.path, None, None)
-    )
-    return (
-        fmt.natural_sort_key(primary),
-        r.plex_season_number or 0,
-        r.plex_episode_number or 0,
-        r.path,
-    )
-
-
 async def bazarr_url_for(local_path: str) -> str | None:
     """Bazarr deep-link for the detail route. Derived from the Radarr movie id
     / Sonarr series id we already hold, gated by config flags — no Bazarr API."""
@@ -228,71 +198,6 @@ async def sonarr_url_for(sonarr_base: str | None, local_path: str) -> str | None
         return None
     series = await queries.series_for_local_path(local_path)
     return fmt.sonarr_deeplink(sonarr_base, series.title_slug if series else None)
-
-
-def find_prev_season_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
-    """First episode of the previous season within the same show."""
-    cur_show = ordered[i].plex_show_title
-    cur_season = ordered[i].plex_season_number
-    if cur_show is None or cur_season is None:
-        return None
-    j = i - 1
-    while j >= 0 and ordered[j].plex_show_title == cur_show:
-        if ordered[j].plex_season_number != cur_season:
-            # j is the last episode of some earlier season; walk back
-            # to that season's first episode (same sort order as library).
-            prev_season = ordered[j].plex_season_number
-            while j > 0 and (
-                ordered[j - 1].plex_show_title == cur_show
-                and ordered[j - 1].plex_season_number == prev_season
-            ):
-                j -= 1
-            return ordered[j].path
-        j -= 1
-    return None
-
-
-def find_next_season_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
-    """First episode of the next season within the same show."""
-    cur_show = ordered[i].plex_show_title
-    cur_season = ordered[i].plex_season_number
-    if cur_show is None or cur_season is None:
-        return None
-    j = i + 1
-    while j < len(ordered) and ordered[j].plex_show_title == cur_show:
-        if ordered[j].plex_season_number != cur_season:
-            return ordered[j].path
-        j += 1
-    return None
-
-
-def find_prev_show_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
-    """First episode of the previous show in the library."""
-    cur_show = ordered[i].plex_show_title
-    if cur_show is None:
-        return None
-    j = i - 1
-    while j >= 0 and ordered[j].plex_show_title == cur_show:
-        j -= 1
-    if j < 0:
-        return None
-    prev_show = ordered[j].plex_show_title
-    while j > 0 and ordered[j - 1].plex_show_title == prev_show:
-        j -= 1
-    return ordered[j].path
-
-
-def find_next_show_path(ordered: list[queries.LibraryRow], i: int) -> str | None:
-    """First episode of the next show in the library."""
-    cur_show = ordered[i].plex_show_title
-    if cur_show is None:
-        return None
-    j = i + 1
-    while j < len(ordered) and ordered[j].plex_show_title == cur_show:
-        j += 1
-    if j >= len(ordered):
-        return None
-    return ordered[j].path
 
 
 def annotate_tracks(
@@ -456,7 +361,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     all_rows = await library_rows_for(lib)
     raw_rows = sorted(
         (r for r in all_rows if not is_extra(r.path)),
-        key=library_sort_key,
+        key=views.library_sort_key,
     )
     audio_by_path, sub_by_path = await library_tracks_for(lib)
 
@@ -503,7 +408,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     available: set[str] = set()
     for r in rows:
         if r.kind in jump_anchor_kinds:
-            letter = jump_letter(r.display_title)
+            letter = views.jump_letter(r.display_title)
             available.add(letter)
             r.jump_letter = letter if letter != last_letter else None
             last_letter = letter
@@ -521,7 +426,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
             "is_tv": is_tv,
             "libraries": libraries(),
             "current_slug": slug,
-            "jump_letters": JUMP_LETTERS,
+            "jump_letters": views.JUMP_LETTERS,
             "available_letters": available,
         },
     )
@@ -548,7 +453,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
         # consistent. Hops over bonus features (extras).
         ordered = sorted(
             (r for r in await library_rows_for(lib) if not is_extra(r.path)),
-            key=library_sort_key,
+            key=views.library_sort_key,
         )
         paths = [r.path for r in ordered]
         try:
@@ -561,10 +466,10 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             next_path = paths[i + 1]
         if 0 <= i < len(paths) and ordered[i].plex_season_number is not None:
             is_episode = True
-            prev_season_path = find_prev_season_path(ordered, i)
-            next_season_path = find_next_season_path(ordered, i)
-            prev_show_path = find_prev_show_path(ordered, i)
-            next_show_path = find_next_show_path(ordered, i)
+            prev_season_path = views.find_prev_season_path(ordered, i)
+            next_season_path = views.find_next_season_path(ordered, i)
+            prev_show_path = views.find_prev_show_path(ordered, i)
+            next_show_path = views.find_next_show_path(ordered, i)
 
     audio_rows = await queries.get_audio_tracks(path)
     internal_subs, external_subs = await queries.get_subtitle_tracks(path)
@@ -604,7 +509,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             )
             extras.append(
                 {
-                    "mf": detail_view(emf, emi, ear),
+                    "mf": views.detail_view(emf, emi, ear),
                     "audio": ea_view,
                     "subtitle": es_view,
                     "aspect_set": eset,
@@ -618,7 +523,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
         request,
         "detail.html",
         {
-            "mf": detail_view(mf, mi, ar),
+            "mf": views.detail_view(mf, mi, ar),
             "audio": audio_view,
             "subtitle": subtitle_view,
             "plex_item": plex_item,
@@ -650,40 +555,6 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             "mi_badges": fmt.mediainfo_badges(mi, audio_rows),
         },
     )
-
-
-def detail_view(
-    mf: models.VideoFile,
-    mi: models.Mediainfo | None,
-    ar: models.Ardetector | None,
-) -> dict:
-    """Flatten media_file + mediainfo + ardetector into one dict the
-    detail template treats as the legacy `mf` object. NULL probe rows
-    surface as None values, which the template already renders as '—'.
-    """
-    errors: list[str] = []
-    if mi and mi.error:
-        errors.append(f"mediainfo: {mi.error}")
-    if ar and ar.error:
-        errors.append(f"ardetector: {ar.error}")
-    return {
-        "path": mf.path,
-        "container": mi.container if mi else None,
-        "duration": mi.duration if mi else None,
-        "video_codec": mi.video_codec if mi else None,
-        "video_profile": mi.video_profile if mi else None,
-        "video_width": mi.video_width if mi else None,
-        "video_height": mi.video_height if mi else None,
-        "video_bit_depth": mi.video_bit_depth if mi else None,
-        "video_hdr": mi.video_hdr if mi else None,
-        "video_hdr_format": mi.video_hdr_format if mi else None,
-        "video_frame_rate": mi.video_frame_rate if mi else None,
-        "video_bit_rate": mi.video_bit_rate if mi else None,
-        "video_max_bit_rate": mi.video_max_bit_rate if mi else None,
-        "aspect_primary": ar.aspect_primary if ar else None,
-        "color": fmt.format_color(ar.color_pct if ar else None),
-        "error": "; ".join(errors) if errors else None,
-    }
 
 
 @api.get("/info/by-content-id/{content_id}")
