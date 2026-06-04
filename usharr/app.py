@@ -199,14 +199,16 @@ class InfoByContentIdResponse(InfoResponse):
     plex_files: list[str]
 
 
-async def build_info(mf: models.VideoFile) -> InfoResponse:
+async def build_info[T: InfoResponse](
+    mf: models.VideoFile, response_cls: type[T], **extra: Any
+) -> T:
     path = mf.path
     mi = await queries.get_mediainfo(path)
     ar = await queries.get_ardetector(path)
     internal_subs, external_subs = await queries.get_subtitle_tracks(path)
     samples_raw = ar.aspect_samples_parsed if ar else None
     samples = [AspectSample(**s) for s in samples_raw] if samples_raw else None
-    return InfoResponse(
+    return response_cls(
         path=path,
         mediainfo_error=mi.error if mi else None,
         ardetector_error=ar.error if ar else None,
@@ -220,6 +222,7 @@ async def build_info(mf: models.VideoFile) -> InfoResponse:
         ),
         audio=await queries.get_audio_tracks(path),
         subtitles=[*internal_subs, *external_subs],
+        **extra,
     )
 
 
@@ -465,8 +468,9 @@ async def get_info_by_content_id(content_id: str) -> InfoByContentIdResponse:
     for f in plex_files:
         row = await queries.get_by_remote_path(f, path_map)
         if row is not None:
-            return InfoByContentIdResponse(
-                **(await build_info(row)).model_dump(),
+            return await build_info(
+                row,
+                InfoByContentIdResponse,
                 plex_content_id=content_id,
                 plex_files=plex_files,
             )
@@ -482,7 +486,7 @@ async def get_info(file_path: str) -> InfoResponse:
     row = await queries.get(path)
     if row is None:
         raise HTTPException(status_code=404, detail=f"no record for {path}")
-    return await build_info(row)
+    return await build_info(row, InfoResponse)
 
 
 @api.post("/webhook")
