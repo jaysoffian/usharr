@@ -4,7 +4,7 @@
 {% if rows %}
 <div class="table-pad"></div>
 <nav class="letter-rail" aria-label="Jump to letter">
-{%- for L in jump_letters -%}
+{%- for L in jump_letters_alphabet -%}
   {% if L in available_letters %}<a href="#jump-{{ L }}">{{ L }}</a>{% else %}<span class="disabled">{{ L }}</span>{% endif %}
 {%- endfor -%}
 </nav>
@@ -22,8 +22,9 @@
 </thead>
 <tbody>
 {% for r in rows %}
+  {% set L = jump_letters[loop.index0] %}
   {% if r.kind == "show" %}
-  <tr class="show-header" data-show-title="{{ r.show_title }}"{% if r.jump_letter %} id="jump-{{ r.jump_letter }}"{% endif %}>
+  <tr class="show-header" data-show-title="{{ r.show_title }}"{% if L %} id="jump-{{ L }}"{% endif %}>
     <td class="title show-title" colspan="7">{{ r.display_title }}{% if r.season_count and r.episode_count %}<span class="show-counts"> · {{ r.season_count }} season{{ 's' if r.season_count != 1 else '' }} · {{ r.episode_count }} episode{{ 's' if r.episode_count != 1 else '' }}</span>{% endif %}</td>
   </tr>
   {% elif r.kind == "season" %}
@@ -31,27 +32,34 @@
     <td class="title season-title" colspan="7">{{ r.display_title }}</td>
   </tr>
   {% else %}
-  <tr class="{{ 'scan-error' if r.has_error else '' }}"
-      {% if r.jump_letter %}id="jump-{{ r.jump_letter }}"{% endif %}
-      {% if r.kind == 'episode' %}data-show-title="{{ r.data.plex_show_title }}" data-season-num="{{ r.data.plex_season_number or 0 }}"{% endif %}
-      data-href="/item?path={{ r.data.path|urlencode }}">
-    <td class="title{% if r.kind == 'episode' %} episode-title{% endif %}"><a href="/item?path={{ r.data.path|urlencode }}">{{ r.display_title }}{% if r.edition %} <span class="edition">{{ r.edition }}</span>{% endif %}</a></td>
-    <td class="narrow">{{ r.plex_year or '' }}</td>
+  {% set sc = sub_chip(r) %}
+  {% set ars, truncated = aspects(r) %}
+  {% set u_plex = plex_url(r, server_url, machine_id) %}
+  {% set u_tautulli = tautulli_url(r, config.tautulli.url) %}
+  {% set u_bazarr = bazarr_url(r, config) %}
+  {% set u_radarr = radarr_url(r, config.radarr.url) %}
+  {% set u_sonarr = sonarr_url(r, config.sonarr.url) %}
+  <tr class="{{ 'scan-error' if has_error(r) else '' }}"
+      {% if L %}id="jump-{{ L }}"{% endif %}
+      {% if r.kind == 'episode' %}data-show-title="{{ r.plex_show_title }}" data-season-num="{{ r.plex_season_number or 0 }}"{% endif %}
+      data-href="/item?path={{ r.path|urlencode }}">
+    <td class="title{% if r.kind == 'episode' %} episode-title{% endif %}"><a href="/item?path={{ r.path|urlencode }}">{{ grid_title(r) }}{% if grid_edition(r) %} <span class="edition">{{ grid_edition(r) }}</span>{% endif %}</a></td>
+    <td class="narrow">{{ grid_year(r) or '' }}</td>
     <td class="narrow ars">
-      {% for a in r.aspects %}<span class="{{ 'ar primary' if a.is_primary else 'ar' }}">{{ a.ratio|round(2) }}</span>{% if not loop.last %} {% endif %}{% endfor %}{% if r.aspects_truncated %} <span class="ar-more">…</span>{% endif %}
+      {% for a in ars %}<span class="{{ 'ar primary' if a.is_primary else 'ar' }}">{{ a.ratio|round(2) }}</span>{% if not loop.last %} {% endif %}{% endfor %}{% if truncated %} <span class="ar-more">…</span>{% endif %}
     </td>
-    <td class="video">{{ r.video_summary }}</td>
-    <td class="audio">{{ r.audio_summary }}</td>
+    <td class="video">{{ video_summary(r) }}</td>
+    <td class="audio">{{ audio_summary(r) }}</td>
     <td class="narrow subs">
-      {% if r.sub_chip %}<span class="sub-chip">{{ r.sub_chip.fmt }}{% if r.sub_chip.sdh %}<span class="sub-sdh">SDH</span>{% endif %}</span>{% endif %}
+      {% if sc %}<span class="sub-chip">{{ sc.fmt }}{% if sc.sdh %}<span class="sub-sdh">SDH</span>{% endif %}</span>{% endif %}
     </td>
     <td class="narrow links">
       <span class="svc-group">
-        {% if r.plex_url %}<a class="svc svc-plex" href="{{ r.plex_url }}" target="_blank" rel="noopener" title="Plex"></a>{% endif %}
-        {% if r.tautulli_url %}<a class="svc svc-tautulli" href="{{ r.tautulli_url }}" target="_blank" rel="noopener" title="Tautulli"></a>{% endif %}
-        {% if r.bazarr_url %}<a class="svc svc-bazarr" href="{{ r.bazarr_url }}" target="_blank" rel="noopener" title="Bazarr"></a>{% endif %}
-        {% if r.radarr_url %}<a class="svc svc-radarr" href="{{ r.radarr_url }}" target="_blank" rel="noopener" title="Radarr"></a>{% endif %}
-        {% if r.sonarr_url %}<a class="svc svc-sonarr" href="{{ r.sonarr_url }}" target="_blank" rel="noopener" title="Sonarr"></a>{% endif %}
+        {% if u_plex %}<a class="svc svc-plex" href="{{ u_plex }}" target="_blank" rel="noopener" title="Plex"></a>{% endif %}
+        {% if u_tautulli %}<a class="svc svc-tautulli" href="{{ u_tautulli }}" target="_blank" rel="noopener" title="Tautulli"></a>{% endif %}
+        {% if u_bazarr %}<a class="svc svc-bazarr" href="{{ u_bazarr }}" target="_blank" rel="noopener" title="Bazarr"></a>{% endif %}
+        {% if u_radarr %}<a class="svc svc-radarr" href="{{ u_radarr }}" target="_blank" rel="noopener" title="Radarr"></a>{% endif %}
+        {% if u_sonarr %}<a class="svc svc-sonarr" href="{{ u_sonarr }}" target="_blank" rel="noopener" title="Sonarr"></a>{% endif %}
       </span>
     </td>
   </tr>

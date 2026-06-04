@@ -287,6 +287,10 @@ class LibraryRow:
     def plex_episode_number(self) -> int | None:
         return self.plex.episode_number if self.plex else None
 
+    @property
+    def kind(self) -> str:
+        return "episode" if self.plex_season_number is not None else "movie"
+
 
 def _series_for(path: str, by_folder: dict[str, Series]) -> Series | None:
     """The Series whose video_folder is the deepest ancestor of ``path`` —

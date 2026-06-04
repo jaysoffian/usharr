@@ -97,6 +97,29 @@ def static_url(filename: str) -> str:
 
 jinja_globals["static_url"] = static_url
 
+# Grid + detail view helpers (the template calls these on the data models,
+# the same pattern as resolution_bucket above).
+jinja_globals["grid_title"] = views.grid_title
+jinja_globals["grid_year"] = views.grid_year
+jinja_globals["grid_edition"] = views.grid_edition
+jinja_globals["video_summary"] = views.video_summary
+jinja_globals["audio_summary"] = views.audio_summary
+jinja_globals["sub_chip"] = views.sub_chip
+jinja_globals["has_error"] = views.has_error
+jinja_globals["aspects"] = views.aspects
+jinja_globals["plex_url"] = views.plex_url
+jinja_globals["tautulli_url"] = views.tautulli_url
+jinja_globals["bazarr_url"] = views.bazarr_url
+jinja_globals["radarr_url"] = views.radarr_url
+jinja_globals["sonarr_url"] = views.sonarr_url
+jinja_globals["color"] = views.color
+jinja_globals["detail_error"] = views.detail_error
+jinja_globals["audio_lang"] = views.audio_lang
+jinja_globals["audio_title"] = views.audio_title
+jinja_globals["audio_details"] = views.audio_details
+jinja_globals["sub_lang"] = views.sub_lang
+templates.env.filters["dash"] = views.dash
+
 
 def slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -292,21 +315,12 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     machine_id = await plex.get_machine_identifier()
     server_url = config.plex.url or await plex.get_server_url()
 
-    file_rows = [
-        views.render_row(
-            r,
-            config=config,
-            server_url=server_url,
-            machine_id=machine_id,
-        )
-        for r in rows_data
-    ]
-    is_tv = any(row.kind == "episode" for row in file_rows)
+    is_tv = any(r.kind == "episode" for r in rows_data)
     # TV libraries: roll episodes up under show + season header rows.
     # Avoids a 1700-row wall for shows with many seasons. Grouping is
     # purely visual — no click-to-expand, no nesting — so Cmd-F still
     # works and the rail still jumps by show-title letter.
-    rows = views.group_tv_rows(file_rows) if is_tv else file_rows
+    rows = views.group_tv_rows(rows_data) if is_tv else list(rows_data)
     if is_tv:
         titles = sum(1 for r in rows if r.kind == "show")
         episodes = sum(1 for r in rows if r.kind == "episode")
@@ -316,18 +330,23 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
 
     # Letter-jump rail: anchor on show headers (TV) / movie rows (films);
     # skip season + episode rows so the alphabet tracks shows, not
-    # whatever happens to be the first-letter of an episode title.
-    jump_anchor_kinds = {"show", "movie"}
+    # whatever happens to be the first-letter of an episode title. The
+    # parallel jump_letters list carries the per-row anchor letter (or None).
+    jump_letters: list[str | None] = []
     last_letter: str | None = None
     available: set[str] = set()
     for r in rows:
-        if r.kind in jump_anchor_kinds:
-            letter = views.jump_letter(r.display_title)
-            available.add(letter)
-            r.jump_letter = letter if letter != last_letter else None
-            last_letter = letter
+        if isinstance(r, views.ShowHeader):
+            title = r.display_title
+        elif isinstance(r, queries.LibraryRow) and r.kind == "movie":
+            title = views.grid_title(r)
         else:
-            r.jump_letter = None
+            jump_letters.append(None)
+            continue
+        letter = views.jump_letter(title)
+        available.add(letter)
+        jump_letters.append(letter if letter != last_letter else None)
+        last_letter = letter
 
     return templates.TemplateResponse(
         request,
@@ -335,12 +354,16 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
         {
             "label": lib.label,
             "rows": rows,
+            "jump_letters": jump_letters,
             "titles": titles,
             "episodes": episodes,
             "is_tv": is_tv,
             "libraries": libraries(),
             "current_slug": slug,
-            "jump_letters": views.JUMP_LETTERS,
+            "server_url": server_url,
+            "machine_id": machine_id,
+            "config": config,
+            "jump_letters_alphabet": views.JUMP_LETTERS,
             "available_letters": available,
         },
     )
@@ -385,7 +408,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     audio_rows = await queries.get_audio_tracks(path)
     internal_subs, external_subs = await queries.get_subtitle_tracks(path)
     subtitle_rows = [*internal_subs, *external_subs]
-    audio_view, subtitle_view = views.annotate_tracks(path, audio_rows, subtitle_rows)
+    sub_exts = fmt.subtitle_file_exts(path, subtitle_rows)
     plex_item = await queries.get_plex_item_by_local_path(path)
     mi = await queries.get_mediainfo(path)
     ar = await queries.get_ardetector(path)
@@ -414,15 +437,18 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             ear = await queries.get_ardetector(ep)
             ea = await queries.get_audio_tracks(ep)
             ei, ex = await queries.get_subtitle_tracks(ep)
-            ea_view, es_view = views.annotate_tracks(ep, ea, [*ei, *ex])
+            esubs = [*ei, *ex]
             eset = (
                 json.loads(ear.aspect_samples) if ear and ear.aspect_samples else None
             )
             extras.append(
                 {
-                    "mf": views.detail_view(emf, emi, ear),
-                    "audio": ea_view,
-                    "subtitle": es_view,
+                    "mf": emf,
+                    "mi": emi,
+                    "ar": ear,
+                    "audio": ea,
+                    "subtitle": esubs,
+                    "sub_exts": fmt.subtitle_file_exts(ep, esubs),
                     "aspect_set": eset,
                     "duration_str": fmt.format_duration(emi.duration if emi else None),
                     "display_title": fmt.format_display_title(ep, None, None),
@@ -434,9 +460,12 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
         request,
         "detail.html",
         {
-            "mf": views.detail_view(mf, mi, ar),
-            "audio": audio_view,
-            "subtitle": subtitle_view,
+            "mf": mf,
+            "mi": mi,
+            "ar": ar,
+            "audio": audio_rows,
+            "subtitle": subtitle_rows,
+            "sub_exts": sub_exts,
             "plex_item": plex_item,
             "aspect_set": aspect_set,
             "duration_str": fmt.format_duration(mi.duration if mi else None),
