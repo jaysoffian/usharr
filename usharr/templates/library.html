@@ -33,9 +33,9 @@
   {% else %}
   <tr class="{{ 'scan-error' if r.has_error else '' }}"
       {% if r.jump_letter %}id="jump-{{ r.jump_letter }}"{% endif %}
-      {% if r.kind == 'episode' %}data-show-title="{{ r.plex_show_title }}" data-season-num="{{ r.plex_season_number or 0 }}"{% endif %}
-      data-href="/item?path={{ r.path|urlencode }}">
-    <td class="title{% if r.kind == 'episode' %} episode-title{% endif %}"><a href="/item?path={{ r.path|urlencode }}">{{ r.display_title }}{% if r.edition %} <span class="edition">{{ r.edition }}</span>{% endif %}</a></td>
+      {% if r.kind == 'episode' %}data-show-title="{{ r.data.plex_show_title }}" data-season-num="{{ r.data.plex_season_number or 0 }}"{% endif %}
+      data-href="/item?path={{ r.data.path|urlencode }}">
+    <td class="title{% if r.kind == 'episode' %} episode-title{% endif %}"><a href="/item?path={{ r.data.path|urlencode }}">{{ r.display_title }}{% if r.edition %} <span class="edition">{{ r.edition }}</span>{% endif %}</a></td>
     <td class="narrow">{{ r.plex_year or '' }}</td>
     <td class="narrow ars">
       {% for a in r.aspects %}<span class="{{ 'ar primary' if a.is_primary else 'ar' }}">{{ a.ratio|round(2) }}</span>{% if not loop.last %} {% endif %}{% endfor %}{% if r.aspects_truncated %} <span class="ar-more">…</span>{% endif %}

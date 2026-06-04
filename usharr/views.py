@@ -20,14 +20,11 @@ JUMP_LETTERS: tuple[str, ...] = ("#", *(chr(c) for c in range(ord("A"), ord("Z")
 
 @dataclass
 class FileRow:
-    """A movie or episode row: identity + plex metadata + formatted columns."""
+    """A movie or episode grid row: the source ``LibraryRow`` plus only the
+    computed presentation the template adds (formatted summaries, deep-links).
+    Source fields are read through ``data`` — never copied onto this row."""
 
-    kind: str  # "movie" | "episode"
-    path: str
-    plex_title: str | None
-    plex_show_title: str | None
-    plex_season_number: int | None
-    plex_episode_number: int | None
+    data: queries.LibraryRow
     display_title: str
     plex_year: int | None
     edition: str | None
@@ -43,6 +40,10 @@ class FileRow:
     radarr_url: str | None
     sonarr_url: str | None
     jump_letter: str | None = None
+
+    @property
+    def kind(self) -> str:
+        return "episode" if self.data.plex_season_number is not None else "movie"
 
 
 @dataclass
@@ -107,12 +108,7 @@ def render_row(
         aspect_set, ar.aspect_primary if ar else None
     )
     return FileRow(
-        kind="episode" if r.plex_season_number is not None else "movie",
-        path=r.path,
-        plex_title=r.plex_title,
-        plex_show_title=r.plex_show_title,
-        plex_season_number=r.plex_season_number,
-        plex_episode_number=r.plex_episode_number,
+        data=r,
         display_title=fmt.format_display_title(r.path, r.plex_title, r.plex_show_title),
         plex_year=(plex.year if plex else None) or fmt.year_from_path(r.path),
         edition=fmt.edition_from_path(r.path),
@@ -157,8 +153,8 @@ def group_tv_rows(episode_rows: list[FileRow]) -> list[GridRow]:
         if r.kind != "episode":
             out.append(r)
             continue
-        show = r.plex_show_title
-        season = r.plex_season_number
+        show = r.data.plex_show_title
+        season = r.data.plex_season_number
         if show and show != current_show:
             current_show = show
             current_season = None
@@ -181,8 +177,10 @@ def group_tv_rows(episode_rows: list[FileRow]) -> list[GridRow]:
             show_seasons[show].add(season)
         # Drop the show prefix (the header already names it) and prefix the
         # episode number so "1. Pilot" reads naturally under "Season 1".
-        ep_num = r.plex_episode_number
-        ep_title = r.plex_title or fmt.format_display_title(r.path, None, None)
+        ep_num = r.data.plex_episode_number
+        ep_title = r.data.plex_title or fmt.format_display_title(
+            r.data.path, None, None
+        )
         r.display_title = f"{ep_num}. {ep_title}" if ep_num is not None else ep_title
         out.append(r)
         if show:
