@@ -6,7 +6,7 @@ import logging
 import re
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from pymediainfo import MediaInfo
@@ -537,42 +537,14 @@ async def extract(path: Path) -> MediaInfoResult:
 
 
 def to_audio_row(video_path: str, a: AudioTrack) -> models.AudioTrack:
-    return models.AudioTrack.model_validate(
-        {
-            "video_path": video_path,
-            "idx": a.idx,
-            "codec": a.codec,
-            "channels": a.channels,
-            "layout": a.layout,
-            "language": a.language,
-            "title": a.title,
-            "is_default": a.is_default,
-            "is_forced": a.is_forced,
-            "format": a.format,
-            "commercial_name": a.commercial_name,
-            "bit_rate": a.bit_rate,
-            "bit_rate_mode": a.bit_rate_mode,
-            "sample_rate": a.sample_rate,
-            "bit_depth": a.bit_depth,
-            "compression_mode": a.compression_mode,
-        }
-    )
+    return models.AudioTrack.model_validate(asdict(a) | {"video_path": video_path})
 
 
 def to_internal_sub_row(
     video_path: str, s: SubtitleTrack
 ) -> models.SubtitleTrackInternal:
     return models.SubtitleTrackInternal.model_validate(
-        {
-            "video_path": video_path,
-            "idx": s.idx,
-            "codec": s.codec,
-            "language": s.language,
-            "title": s.title,
-            "is_default": s.is_default,
-            "is_forced": s.is_forced,
-            "is_sdh": s.is_sdh,
-        }
+        asdict(s) | {"video_path": video_path}
     )
 
 
