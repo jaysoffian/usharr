@@ -184,6 +184,65 @@ def group_tv_rows(episode_rows: list[queries.LibraryRow]) -> list[GridRow]:
     return out
 
 
+# --- grid assembly ---------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Grid:
+    rows: list[GridRow]
+    jump_letters: list[str | None]
+    titles: int
+    episodes: int | None
+    is_tv: bool
+    available_letters: set[str]
+
+
+def build_grid(rows_data: list[queries.LibraryRow]) -> Grid:
+    """Turn fetched library rows into everything the grid template needs:
+    the (optionally TV-grouped) rows, title/episode counts, and the jump rail."""
+    is_tv = any(r.kind == "episode" for r in rows_data)
+    # TV libraries: roll episodes up under show + season header rows.
+    # Avoids a 1700-row wall for shows with many seasons. Grouping is
+    # purely visual — no click-to-expand, no nesting — so Cmd-F still
+    # works and the rail still jumps by show-title letter.
+    rows: list[GridRow] = group_tv_rows(rows_data) if is_tv else list(rows_data)
+    if is_tv:
+        titles = sum(1 for r in rows if r.kind == "show")
+        episodes: int | None = sum(1 for r in rows if r.kind == "episode")
+    else:
+        titles = sum(1 for r in rows if r.kind == "movie")
+        episodes = None
+
+    # Letter-jump rail: anchor on show headers (TV) / movie rows (films);
+    # skip season + episode rows so the alphabet tracks shows, not
+    # whatever happens to be the first-letter of an episode title. The
+    # parallel jump_letters list carries the per-row anchor letter (or None).
+    jump_letters: list[str | None] = []
+    last_letter: str | None = None
+    available: set[str] = set()
+    for r in rows:
+        if isinstance(r, ShowHeader):
+            title = r.display_title
+        elif isinstance(r, queries.LibraryRow) and r.kind == "movie":
+            title = grid_title(r)
+        else:
+            jump_letters.append(None)
+            continue
+        letter = jump_letter(title)
+        available.add(letter)
+        jump_letters.append(letter if letter != last_letter else None)
+        last_letter = letter
+
+    return Grid(
+        rows=rows,
+        jump_letters=jump_letters,
+        titles=titles,
+        episodes=episodes,
+        is_tv=is_tv,
+        available_letters=available,
+    )
+
+
 # --- library ordering + jump rail -----------------------------------------
 
 

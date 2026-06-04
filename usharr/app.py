@@ -310,74 +310,47 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
         raise HTTPException(status_code=404, detail=f"no library {slug!r}")
 
     rows_data = await queries.library_rows(lib.paths, key=views.library_sort_key)
+    grid = views.build_grid(rows_data)
 
     config = get_config()
     machine_id = await plex.get_machine_identifier()
     server_url = config.plex.url or await plex.get_server_url()
-
-    is_tv = any(r.kind == "episode" for r in rows_data)
-    # TV libraries: roll episodes up under show + season header rows.
-    # Avoids a 1700-row wall for shows with many seasons. Grouping is
-    # purely visual — no click-to-expand, no nesting — so Cmd-F still
-    # works and the rail still jumps by show-title letter.
-    rows = views.group_tv_rows(rows_data) if is_tv else list(rows_data)
-    if is_tv:
-        titles = sum(1 for r in rows if r.kind == "show")
-        episodes = sum(1 for r in rows if r.kind == "episode")
-    else:
-        titles = sum(1 for r in rows if r.kind == "movie")
-        episodes = None
-
-    # Letter-jump rail: anchor on show headers (TV) / movie rows (films);
-    # skip season + episode rows so the alphabet tracks shows, not
-    # whatever happens to be the first-letter of an episode title. The
-    # parallel jump_letters list carries the per-row anchor letter (or None).
-    jump_letters: list[str | None] = []
-    last_letter: str | None = None
-    available: set[str] = set()
-    for r in rows:
-        if isinstance(r, views.ShowHeader):
-            title = r.display_title
-        elif isinstance(r, queries.LibraryRow) and r.kind == "movie":
-            title = views.grid_title(r)
-        else:
-            jump_letters.append(None)
-            continue
-        letter = views.jump_letter(title)
-        available.add(letter)
-        jump_letters.append(letter if letter != last_letter else None)
-        last_letter = letter
 
     return templates.TemplateResponse(
         request,
         "library.html",
         {
             "label": lib.label,
-            "rows": rows,
-            "jump_letters": jump_letters,
-            "titles": titles,
-            "episodes": episodes,
-            "is_tv": is_tv,
+            "rows": grid.rows,
+            "jump_letters": grid.jump_letters,
+            "titles": grid.titles,
+            "episodes": grid.episodes,
+            "is_tv": grid.is_tv,
             "libraries": libraries(),
             "current_slug": slug,
             "server_url": server_url,
             "machine_id": machine_id,
             "config": config,
             "jump_letters_alphabet": views.JUMP_LETTERS,
-            "available_letters": available,
+            "available_letters": grid.available_letters,
         },
     )
 
 
-@app.get("/item", response_class=HTMLResponse, include_in_schema=False)
-async def item_detail(request: Request, path: str) -> HTMLResponse:
-    mf = await queries.get(path)
-    if mf is None:
-        raise HTTPException(status_code=404, detail=f"no record for {path}")
-    lib = next(
-        (lib for lib in libraries() if any(path.startswith(p) for p in lib.paths)),
-        None,
-    )
+@dataclass(frozen=True, slots=True)
+class DetailNav:
+    prev_path: str | None
+    next_path: str | None
+    prev_season_path: str | None
+    next_season_path: str | None
+    prev_show_path: str | None
+    next_show_path: str | None
+    is_episode: bool
+
+
+async def detail_nav(lib: Library | None, path: str) -> DetailNav:
+    """Prev/Next navigation for the detail page: file-order siblings plus, for
+    episodes, the prev/next season and show jump targets."""
     prev_path: str | None = None
     next_path: str | None = None
     prev_season_path: str | None = None
@@ -404,23 +377,21 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             next_season_path = views.find_next_season_path(ordered, i)
             prev_show_path = views.find_prev_show_path(ordered, i)
             next_show_path = views.find_next_show_path(ordered, i)
+    return DetailNav(
+        prev_path=prev_path,
+        next_path=next_path,
+        prev_season_path=prev_season_path,
+        next_season_path=next_season_path,
+        prev_show_path=prev_show_path,
+        next_show_path=next_show_path,
+        is_episode=is_episode,
+    )
 
-    audio_rows = await queries.get_audio_tracks(path)
-    internal_subs, external_subs = await queries.get_subtitle_tracks(path)
-    subtitle_rows = [*internal_subs, *external_subs]
-    sub_exts = fmt.subtitle_file_exts(path, subtitle_rows)
-    plex_item = await queries.get_plex_item_by_local_path(path)
-    mi = await queries.get_mediainfo(path)
-    ar = await queries.get_ardetector(path)
-    aspect_set = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
-    config = get_config()
-    machine_id = await plex.get_machine_identifier()
-    server_url = config.plex.url or await plex.get_server_url()
-    rating_key = plex_item.rating_key if plex_item else None
 
-    # Bonus features: siblings of the main movie that live in an Extras/
-    # Interviews/Featurettes/... subfolder. Skip when viewing an extra
-    # directly — no nested grouping.
+async def gather_extras(path: str) -> list[dict]:
+    """Bonus features: siblings of the main movie that live in an Extras/
+    Interviews/Featurettes/... subfolder. Skip when viewing an extra
+    directly — no nested grouping."""
     extras: list[dict] = []
     if not queries.is_extra(path):
         parent_prefix = str(Path(path).parent) + "/"
@@ -456,6 +427,34 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
                     "edition": fmt.edition_from_path(ep),
                 },
             )
+    return extras
+
+
+@app.get("/item", response_class=HTMLResponse, include_in_schema=False)
+async def item_detail(request: Request, path: str) -> HTMLResponse:
+    mf = await queries.get(path)
+    if mf is None:
+        raise HTTPException(status_code=404, detail=f"no record for {path}")
+    lib = next(
+        (lib for lib in libraries() if any(path.startswith(p) for p in lib.paths)),
+        None,
+    )
+    nav = await detail_nav(lib, path)
+
+    audio_rows = await queries.get_audio_tracks(path)
+    internal_subs, external_subs = await queries.get_subtitle_tracks(path)
+    subtitle_rows = [*internal_subs, *external_subs]
+    sub_exts = fmt.subtitle_file_exts(path, subtitle_rows)
+    plex_item = await queries.get_plex_item_by_local_path(path)
+    mi = await queries.get_mediainfo(path)
+    ar = await queries.get_ardetector(path)
+    aspect_set = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
+    extras = await gather_extras(path)
+    config = get_config()
+    machine_id = await plex.get_machine_identifier()
+    server_url = config.plex.url or await plex.get_server_url()
+    rating_key = plex_item.rating_key if plex_item else None
+
     return templates.TemplateResponse(
         request,
         "detail.html",
@@ -485,13 +484,13 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             "libraries": libraries(),
             "current_slug": lib.slug if lib else "",
             "library_label": lib.label if lib else "Library",
-            "prev_path": prev_path,
-            "next_path": next_path,
-            "prev_season_path": prev_season_path,
-            "next_season_path": next_season_path,
-            "prev_show_path": prev_show_path,
-            "next_show_path": next_show_path,
-            "is_episode": is_episode,
+            "prev_path": nav.prev_path,
+            "next_path": nav.next_path,
+            "prev_season_path": nav.prev_season_path,
+            "next_season_path": nav.next_season_path,
+            "prev_show_path": nav.prev_show_path,
+            "next_show_path": nav.next_show_path,
+            "is_episode": nav.is_episode,
             "mi_badges": fmt.mediainfo_badges(mi, audio_rows),
         },
     )
