@@ -470,7 +470,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     for p in lib["paths"]:
         movies.update(await queries.LibraryRow.movies_for_prefix(p))
 
-    rows = [
+    file_rows = [
         views.render_row(
             r,
             audio=audio_by_path.get(r.path, []),
@@ -482,17 +482,17 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
         )
         for r in raw_rows
     ]
-    is_tv = any(row["kind"] == "episode" for row in rows)
+    is_tv = any(row.kind == "episode" for row in file_rows)
     # TV libraries: roll episodes up under show + season header rows.
     # Avoids a 1700-row wall for shows with many seasons. Grouping is
     # purely visual — no click-to-expand, no nesting — so Cmd-F still
     # works and the rail still jumps by show-title letter.
+    rows = views.group_tv_rows(file_rows) if is_tv else file_rows
     if is_tv:
-        rows = views.group_tv_rows(rows)
-        titles = sum(1 for r in rows if r.get("kind") == "show")
-        episodes = sum(1 for r in rows if r.get("kind") == "episode")
+        titles = sum(1 for r in rows if r.kind == "show")
+        episodes = sum(1 for r in rows if r.kind == "episode")
     else:
-        titles = sum(1 for r in rows if r.get("kind") == "movie")
+        titles = sum(1 for r in rows if r.kind == "movie")
         episodes = None
 
     # Letter-jump rail: anchor on show headers (TV) / movie rows (films);
@@ -502,13 +502,13 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     last_letter: str | None = None
     available: set[str] = set()
     for r in rows:
-        if r.get("kind") in jump_anchor_kinds:
-            letter = jump_letter(r["display_title"])
+        if r.kind in jump_anchor_kinds:
+            letter = jump_letter(r.display_title)
             available.add(letter)
-            r["jump_letter"] = letter if letter != last_letter else None
+            r.jump_letter = letter if letter != last_letter else None
             last_letter = letter
         else:
-            r["jump_letter"] = None
+            r.jump_letter = None
 
     return templates.TemplateResponse(
         request,
