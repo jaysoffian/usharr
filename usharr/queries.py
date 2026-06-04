@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from oxyde import Model
 from oxyde.db import transaction
 from oxyde.queries.raw import execute_raw
 
@@ -32,6 +33,18 @@ from usharr.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+DELETE_CHUNK_SIZE = 500
+
+
+async def chunked_delete(model: type[Model], field: str, values: list) -> int:
+    """Delete rows where ``field`` is in ``values``, in chunks, returning the
+    total number of rows deleted."""
+    total = 0
+    for i in range(0, len(values), DELETE_CHUNK_SIZE):
+        chunk = values[i : i + DELETE_CHUNK_SIZE]
+        total += await model.objects.filter(**{f"{field}__in": chunk}).delete()
+    return total
 
 
 # --- path mapping ---------------------------------------------------------
@@ -107,10 +120,7 @@ async def delete_orphans(present: Iterable[Path | str]) -> None:
     orphans = sorted(await list_paths() - {str(p) for p in present})
     if not orphans:
         return
-    total = 0
-    for i in range(0, len(orphans), 500):
-        chunk = orphans[i : i + 500]
-        total += await VideoFile.objects.filter(path__in=chunk).delete()
+    total = await chunked_delete(VideoFile, "path", orphans)
     logger.info("Removed %d stale row(s) from DB", total)
 
 
@@ -462,12 +472,7 @@ async def list_plex_rating_keys() -> set[str]:
 
 
 async def delete_plex_rating_keys(keys: list[str]) -> int:
-    total = 0
-    for i in range(0, len(keys), 500):
-        total += await PlexItem.objects.filter(
-            rating_key__in=keys[i : i + 500]
-        ).delete()
-    return total
+    return await chunked_delete(PlexItem, "rating_key", keys)
 
 
 # --- radarr (Movie overlay) -----------------------------------------------
@@ -494,10 +499,7 @@ async def list_radarr_movie_ids() -> set[int]:
 
 
 async def delete_radarr_movies(ids: list[int]) -> int:
-    total = 0
-    for i in range(0, len(ids), 500):
-        total += await Movie.objects.filter(id__in=ids[i : i + 500]).delete()
-    return total
+    return await chunked_delete(Movie, "id", ids)
 
 
 async def radarr_tmdb_for_local_path(local_path: str) -> int | None:
@@ -542,10 +544,7 @@ async def list_sonarr_series_ids() -> set[int]:
 
 
 async def delete_sonarr_series(ids: list[int]) -> int:
-    total = 0
-    for i in range(0, len(ids), 500):
-        total += await Series.objects.filter(id__in=ids[i : i + 500]).delete()
-    return total
+    return await chunked_delete(Series, "id", ids)
 
 
 async def series_for_local_path(local_path: str) -> Series | None:
