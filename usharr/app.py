@@ -157,6 +157,14 @@ def is_extra(path: str) -> bool:
     return any(part.lower() in EXTRAS_DIRS for part in Path(path).parent.parts)
 
 
+async def library_listing(paths: list[str]) -> list[queries.LibraryRow]:
+    """The library's grid rows with bonus-feature files hidden and display-
+    sorted. Shared by the grid page and the detail page's prev/next nav so both
+    order files identically."""
+    rows = await queries.library_rows(paths)
+    return sorted((r for r in rows if not is_extra(r.path)), key=views.library_sort_key)
+
+
 async def bazarr_url_for(local_path: str) -> str | None:
     """Bazarr deep-link for the detail route. Derived from the Radarr movie id
     / Sonarr series id we already hold, gated by config flags — no Bazarr API."""
@@ -347,11 +355,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     if lib is None:
         raise HTTPException(status_code=404, detail=f"no library {slug!r}")
 
-    rows_data = await queries.library_rows(lib.paths)
-    rows_data = sorted(
-        (r for r in rows_data if not is_extra(r.path)),
-        key=views.library_sort_key,
-    )
+    rows_data = await library_listing(lib.paths)
 
     config = get_config()
     machine_id = await plex.get_machine_identifier()
@@ -430,10 +434,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     if lib is not None:
         # Use the same sort as the library page so Prev/Next feels
         # consistent. Hops over bonus features (extras).
-        ordered = sorted(
-            (r for r in await queries.library_rows(lib.paths) if not is_extra(r.path)),
-            key=views.library_sort_key,
-        )
+        ordered = await library_listing(lib.paths)
         paths = [r.path for r in ordered]
         try:
             i = paths.index(path)
