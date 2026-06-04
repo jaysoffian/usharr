@@ -8,6 +8,7 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
+from functools import cache
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -133,6 +134,7 @@ class Library:
     paths: list[str]
 
 
+@cache
 def libraries() -> list[Library]:
     return [
         Library(slug=slug(name), label=name, paths=list(paths))
@@ -140,11 +142,13 @@ def libraries() -> list[Library]:
     ]
 
 
+@cache
+def libraries_by_slug() -> dict[str, Library]:
+    return {lib.slug: lib for lib in libraries()}
+
+
 def library_by_slug(slug: str) -> Library | None:
-    for lib in libraries():
-        if lib.slug == slug:
-            return lib
-    return None
+    return libraries_by_slug().get(slug)
 
 
 # --- /api/info response models --------------------------------------------
