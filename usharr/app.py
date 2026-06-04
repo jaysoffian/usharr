@@ -7,7 +7,7 @@ import os
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -319,39 +319,28 @@ class DetailNav:
 async def detail_nav(lib: Library | None, path: str) -> DetailNav:
     """Prev/Next navigation for the detail page: file-order siblings plus, for
     episodes, the prev/next season and show jump targets."""
-    prev_path: str | None = None
-    next_path: str | None = None
-    prev_season_path: str | None = None
-    next_season_path: str | None = None
-    prev_show_path: str | None = None
-    next_show_path: str | None = None
-    is_episode = False
-    if lib is not None:
-        # Use the same sort as the library page so Prev/Next feels
-        # consistent. Hops over bonus features (extras).
-        ordered = await queries.library_rows(lib.paths, key=views.library_sort_key)
-        paths = [r.path for r in ordered]
-        try:
-            i = paths.index(path)
-        except ValueError:
-            i = -1
-        if i > 0:
-            prev_path = paths[i - 1]
-        if 0 <= i < len(paths) - 1:
-            next_path = paths[i + 1]
-        if 0 <= i < len(paths) and ordered[i].plex_season_number is not None:
-            is_episode = True
-            prev_season_path = views.find_prev_season_path(ordered, i)
-            next_season_path = views.find_next_season_path(ordered, i)
-            prev_show_path = views.find_prev_show_path(ordered, i)
-            next_show_path = views.find_next_show_path(ordered, i)
+    if lib is None:
+        return DetailNav(None, None, None, None, None, None, False)
+    # Use the same sort as the library page so Prev/Next feels
+    # consistent. Hops over bonus features (extras).
+    ordered = await queries.library_rows(lib.paths, key=views.library_sort_key)
+    paths = [r.path for r in ordered]
+    try:
+        i = paths.index(path)
+    except ValueError:
+        i = -1
+    is_episode = 0 <= i < len(paths) and ordered[i].plex_season_number is not None
     return DetailNav(
-        prev_path=prev_path,
-        next_path=next_path,
-        prev_season_path=prev_season_path,
-        next_season_path=next_season_path,
-        prev_show_path=prev_show_path,
-        next_show_path=next_show_path,
+        prev_path=paths[i - 1] if i > 0 else None,
+        next_path=paths[i + 1] if 0 <= i < len(paths) - 1 else None,
+        prev_season_path=views.find_prev_season_path(ordered, i)
+        if is_episode
+        else None,
+        next_season_path=views.find_next_season_path(ordered, i)
+        if is_episode
+        else None,
+        prev_show_path=views.find_prev_show_path(ordered, i) if is_episode else None,
+        next_show_path=views.find_next_show_path(ordered, i) if is_episode else None,
         is_episode=is_episode,
     )
 
@@ -449,13 +438,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             "libraries": libraries(),
             "current_slug": lib.slug if lib else "",
             "library_label": lib.label if lib else "Library",
-            "prev_path": nav.prev_path,
-            "next_path": nav.next_path,
-            "prev_season_path": nav.prev_season_path,
-            "next_season_path": nav.next_season_path,
-            "prev_show_path": nav.prev_show_path,
-            "next_show_path": nav.next_show_path,
-            "is_episode": nav.is_episode,
+            **asdict(nav),
             "mi_badges": fmt.mediainfo_badges(mi, audio_rows),
         },
     )
