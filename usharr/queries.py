@@ -220,6 +220,29 @@ async def get_subtitle_tracks(
     return internal, external
 
 
+@dataclass
+class PathMedia:
+    mf: VideoFile
+    mediainfo: Mediainfo | None
+    ardetector: Ardetector | None
+    audio: list[AudioTrack]
+    subtitles: list[SubtitleTrackInternal | SubtitleTrackExternal]
+
+
+async def load_path_media(path: str) -> PathMedia | None:
+    mf = await get(path)
+    if mf is None:
+        return None
+    internal, external = await get_subtitle_tracks(path)
+    return PathMedia(
+        mf=mf,
+        mediainfo=await get_mediainfo(path),
+        ardetector=await get_ardetector(path),
+        audio=await get_audio_tracks(path),
+        subtitles=[*internal, *external],
+    )
+
+
 async def subtitle_files_for(video_path: Path | str) -> dict[str, tuple[int, int]]:
     """Return {subtitle_path: (size_bytes, mtime_ns)} for a video's sidecars."""
     rows = await SubtitleFile.objects.filter(video_path=str(video_path)).all()

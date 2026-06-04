@@ -22,6 +22,7 @@ Oxyde caveats baked into these definitions:
   * String columns need ``db_type="TEXT"`` or they render ``VARCHAR(255)``.
 """
 
+import json
 from typing import ClassVar
 
 from oxyde import Field, Index, Model
@@ -97,6 +98,10 @@ class Ardetector(Model):
         indexes: ClassVar[list[Index]] = [
             Index(("video_path",), unique=True, name="ardetector_video_uq")
         ]
+
+    @property
+    def aspect_samples_parsed(self) -> list[dict] | None:
+        return json.loads(self.aspect_samples) if self.aspect_samples else None
 
 
 class AudioTrack(Model):

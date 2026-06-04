@@ -232,7 +232,7 @@ async def build_info(mf: models.VideoFile) -> InfoResponse:
     mi = await queries.get_mediainfo(path)
     ar = await queries.get_ardetector(path)
     internal_subs, external_subs = await queries.get_subtitle_tracks(path)
-    samples_raw = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
+    samples_raw = ar.aspect_samples_parsed if ar else None
     samples = [AspectSample(**s) for s in samples_raw] if samples_raw else None
     return InfoResponse(
         path=path,
@@ -401,27 +401,23 @@ async def gather_extras(path: str) -> list[dict]:
             if p.startswith(parent_prefix) and queries.is_extra(p)
         )
         for ep in extra_paths:
-            emf = await queries.get(ep)
-            if emf is None:
+            pm = await queries.load_path_media(ep)
+            if pm is None:
                 continue
-            emi = await queries.get_mediainfo(ep)
-            ear = await queries.get_ardetector(ep)
-            ea = await queries.get_audio_tracks(ep)
-            ei, ex = await queries.get_subtitle_tracks(ep)
-            esubs = [*ei, *ex]
-            eset = (
-                json.loads(ear.aspect_samples) if ear and ear.aspect_samples else None
-            )
             extras.append(
                 {
-                    "mf": emf,
-                    "mi": emi,
-                    "ar": ear,
-                    "audio": ea,
-                    "subtitle": esubs,
-                    "sub_exts": fmt.subtitle_file_exts(ep, esubs),
-                    "aspect_set": eset,
-                    "duration_str": fmt.format_duration(emi.duration if emi else None),
+                    "mf": pm.mf,
+                    "mi": pm.mediainfo,
+                    "ar": pm.ardetector,
+                    "audio": pm.audio,
+                    "subtitle": pm.subtitles,
+                    "sub_exts": fmt.subtitle_file_exts(ep, pm.subtitles),
+                    "aspect_set": pm.ardetector.aspect_samples_parsed
+                    if pm.ardetector
+                    else None,
+                    "duration_str": fmt.format_duration(
+                        pm.mediainfo.duration if pm.mediainfo else None
+                    ),
                     "display_title": fmt.format_display_title(ep, None, None),
                     "year": fmt.year_from_path(ep),
                     "edition": fmt.edition_from_path(ep),
@@ -432,8 +428,8 @@ async def gather_extras(path: str) -> list[dict]:
 
 @app.get("/item", response_class=HTMLResponse, include_in_schema=False)
 async def item_detail(request: Request, path: str) -> HTMLResponse:
-    mf = await queries.get(path)
-    if mf is None:
+    pm = await queries.load_path_media(path)
+    if pm is None:
         raise HTTPException(status_code=404, detail=f"no record for {path}")
     lib = next(
         (lib for lib in libraries() if any(path.startswith(p) for p in lib.paths)),
@@ -441,14 +437,14 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     )
     nav = await detail_nav(lib, path)
 
-    audio_rows = await queries.get_audio_tracks(path)
-    internal_subs, external_subs = await queries.get_subtitle_tracks(path)
-    subtitle_rows = [*internal_subs, *external_subs]
+    mf = pm.mf
+    mi = pm.mediainfo
+    ar = pm.ardetector
+    audio_rows = pm.audio
+    subtitle_rows = pm.subtitles
     sub_exts = fmt.subtitle_file_exts(path, subtitle_rows)
     plex_item = await queries.get_plex_item_by_local_path(path)
-    mi = await queries.get_mediainfo(path)
-    ar = await queries.get_ardetector(path)
-    aspect_set = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
+    aspect_set = ar.aspect_samples_parsed if ar else None
     extras = await gather_extras(path)
     config = get_config()
     machine_id = await plex.get_machine_identifier()

@@ -8,7 +8,6 @@ the show/season header rows ``group_tv_rows`` inserts. The template branches on
 display columns.
 """
 
-import json
 from collections import Counter
 from dataclasses import dataclass
 
@@ -87,7 +86,7 @@ def has_error(r: queries.LibraryRow) -> bool:
 
 def aspects(r: queries.LibraryRow) -> tuple[list[dict], bool]:
     ar = r.ardetector
-    aspect_set = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
+    aspect_set = ar.aspect_samples_parsed if ar else None
     return fmt.format_aspects_for_row(aspect_set, ar.aspect_primary if ar else None)
 
 

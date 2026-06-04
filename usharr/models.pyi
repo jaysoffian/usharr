@@ -9,6 +9,7 @@ from uuid import UUID
 from oxyde import Model
 from oxyde.queries import Query, QueryManager
 
+import json
 from typing import ClassVar
 from oxyde import Field, Index, Model
 
@@ -2113,6 +2114,9 @@ class Ardetector(Model):
     aspect_samples: str | None
     color_pct: float | None
     video_path: str | None
+    @property
+    def aspect_samples_parsed(self) -> list[dict] | None:
+        ...
     objects: ClassVar["ArdetectorManager"]
 
 
@@ -7639,3 +7643,4 @@ class PlexAuthManager(QueryManager[PlexAuth]):
     ) -> int:
         """Bulk update objects."""
         ...
+
