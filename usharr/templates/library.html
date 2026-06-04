@@ -34,11 +34,11 @@
   {% else %}
   {% set sc = sub_chip(r) %}
   {% set ars, truncated = aspects(r) %}
-  {% set u_plex = plex_url(r, server_url, machine_id) %}
-  {% set u_tautulli = tautulli_url(r, config.tautulli.url) %}
-  {% set u_bazarr = bazarr_url(r, config) %}
-  {% set u_radarr = radarr_url(r, config.radarr.url) %}
-  {% set u_sonarr = sonarr_url(r, config.sonarr.url) %}
+  {% set u_plex = plex_url(r.plex, server_url, machine_id) %}
+  {% set u_tautulli = tautulli_url(r.plex, config.tautulli.url) %}
+  {% set u_bazarr = bazarr_url(r.movie, r.series, config) %}
+  {% set u_radarr = radarr_url(r.movie, config.radarr.url) %}
+  {% set u_sonarr = sonarr_url(r.series, config.sonarr.url) %}
   <tr class="{{ 'scan-error' if has_error(r) else '' }}"
       {% if L %}id="jump-{{ L }}"{% endif %}
       {% if r.kind == 'episode' %}data-show-title="{{ r.plex_show_title }}" data-season-num="{{ r.plex_season_number or 0 }}"{% endif %}

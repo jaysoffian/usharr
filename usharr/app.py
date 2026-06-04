@@ -147,38 +147,6 @@ def library_by_slug(slug: str) -> Library | None:
     return None
 
 
-async def bazarr_url_for(local_path: str) -> str | None:
-    """Bazarr deep-link for the detail route. Derived from the Radarr movie id
-    / Sonarr series id we already hold, gated by config flags — no Bazarr API."""
-    cfg = get_config().bazarr
-    if not cfg.url:
-        return None
-    if cfg.link_movies:
-        movie_id = await queries.radarr_id_for_local_path(local_path)
-        if movie_id is not None:
-            return fmt.bazarr_movie_deeplink(cfg.url, movie_id)
-    if cfg.link_series:
-        series = await queries.series_for_local_path(local_path)
-        if series is not None:
-            return fmt.bazarr_series_deeplink(cfg.url, series.id)
-    return None
-
-
-async def radarr_url_for(radarr_base: str | None, local_path: str) -> str | None:
-    if not radarr_base:
-        return None
-    return fmt.radarr_deeplink(
-        radarr_base, await queries.radarr_tmdb_for_local_path(local_path)
-    )
-
-
-async def sonarr_url_for(sonarr_base: str | None, local_path: str) -> str | None:
-    if not sonarr_base:
-        return None
-    series = await queries.series_for_local_path(local_path)
-    return fmt.sonarr_deeplink(sonarr_base, series.title_slug if series else None)
-
-
 # --- /api/info response models --------------------------------------------
 
 
@@ -444,12 +412,13 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     subtitle_rows = pm.subtitles
     sub_exts = fmt.subtitle_file_exts(path, subtitle_rows)
     plex_item = await queries.get_plex_item_by_local_path(path)
+    movie = await queries.movie_for_local_path(path)
+    series = await queries.series_for_local_path(path)
     aspect_set = ar.aspect_samples_parsed if ar else None
     extras = await gather_extras(path)
     config = get_config()
     machine_id = await plex.get_machine_identifier()
     server_url = config.plex.url or await plex.get_server_url()
-    rating_key = plex_item.rating_key if plex_item else None
 
     return templates.TemplateResponse(
         request,
@@ -471,11 +440,11 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
                 plex_item.title if plex_item else None,
                 plex_item.show_title if plex_item else None,
             ),
-            "plex_url": fmt.plex_deeplink(server_url, machine_id, rating_key),
-            "tautulli_url": fmt.tautulli_deeplink(config.tautulli.url, rating_key),
-            "bazarr_url": await bazarr_url_for(path),
-            "radarr_url": await radarr_url_for(config.radarr.url, path),
-            "sonarr_url": await sonarr_url_for(config.sonarr.url, path),
+            "plex_url": views.plex_url(plex_item, server_url, machine_id),
+            "tautulli_url": views.tautulli_url(plex_item, config.tautulli.url),
+            "bazarr_url": views.bazarr_url(movie, series, config),
+            "radarr_url": views.radarr_url(movie, config.radarr.url),
+            "sonarr_url": views.sonarr_url(series, config.sonarr.url),
             "extras": extras,
             "libraries": libraries(),
             "current_slug": lib.slug if lib else "",

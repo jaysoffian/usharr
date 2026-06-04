@@ -525,11 +525,6 @@ async def delete_radarr_movies(ids: list[int]) -> int:
     return await chunked_delete(Movie, "id", ids)
 
 
-async def radarr_tmdb_for_local_path(local_path: str) -> int | None:
-    m = await Movie.objects.filter(video_path=local_path, tmdb_id__isnull=False).first()
-    return m.tmdb_id if m else None
-
-
 async def all_radarr_movies_by_local_path() -> dict[str, int]:
     rows = await Movie.objects.filter(tmdb_id__isnull=False).all()
     return {
@@ -537,10 +532,8 @@ async def all_radarr_movies_by_local_path() -> dict[str, int]:
     }
 
 
-async def radarr_id_for_local_path(local_path: str) -> int | None:
-    """Radarr movie id (for the Bazarr /movies/{id} deep-link)."""
-    m = await Movie.objects.filter(video_path=local_path).first()
-    return m.id if m else None
+async def movie_for_local_path(local_path: str) -> Movie | None:
+    return await Movie.objects.filter(video_path=local_path).first()
 
 
 # --- sonarr (Series) ------------------------------------------------------

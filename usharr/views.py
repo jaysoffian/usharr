@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from usharr import format as fmt
 from usharr import models, queries
 from usharr.audio_title import clean_audio_title
-from usharr.config import BazarrConfig, Config
+from usharr.config import Config
 
 JUMP_LETTERS: tuple[str, ...] = ("#", *(chr(c) for c in range(ord("A"), ord("Z") + 1)))
 
@@ -93,43 +93,37 @@ def aspects(r: queries.LibraryRow) -> tuple[list[dict], bool]:
 # --- grid link helpers (take the request context the page resolves) --------
 
 
-def bazarr_link(
-    r: queries.LibraryRow, movie: models.Movie | None, bazarr: BazarrConfig
+def plex_url(
+    plex: models.PlexItem | None, server_url: str | None, machine_id: str | None
+) -> str | None:
+    return fmt.plex_deeplink(server_url, machine_id, plex.rating_key if plex else None)
+
+
+def tautulli_url(plex: models.PlexItem | None, base: str | None) -> str | None:
+    return fmt.tautulli_deeplink(base, plex.rating_key if plex else None)
+
+
+def bazarr_url(
+    movie: models.Movie | None, series: models.Series | None, config: Config
 ) -> str | None:
     """Bazarr deep-link off the Radarr movie id when present, else the Sonarr
-    series id — gated by config, from the overlays already loaded."""
+    series id — gated by config."""
+    bazarr = config.bazarr
     if not bazarr.url:
         return None
     if bazarr.link_movies and movie is not None:
         return fmt.bazarr_movie_deeplink(bazarr.url, movie.id)
-    series_id = r.series.id if r.series else None
-    if bazarr.link_series and series_id is not None:
-        return fmt.bazarr_series_deeplink(bazarr.url, series_id)
+    if bazarr.link_series and series is not None:
+        return fmt.bazarr_series_deeplink(bazarr.url, series.id)
     return None
 
 
-def plex_url(
-    r: queries.LibraryRow, server_url: str | None, machine_id: str | None
-) -> str | None:
-    return fmt.plex_deeplink(
-        server_url, machine_id, r.plex.rating_key if r.plex else None
-    )
+def radarr_url(movie: models.Movie | None, base: str | None) -> str | None:
+    return fmt.radarr_deeplink(base, movie.tmdb_id if movie else None)
 
 
-def tautulli_url(r: queries.LibraryRow, base: str | None) -> str | None:
-    return fmt.tautulli_deeplink(base, r.plex.rating_key if r.plex else None)
-
-
-def bazarr_url(r: queries.LibraryRow, config: Config) -> str | None:
-    return bazarr_link(r, r.movie, config.bazarr)
-
-
-def radarr_url(r: queries.LibraryRow, base: str | None) -> str | None:
-    return fmt.radarr_deeplink(base, r.movie.tmdb_id if r.movie else None)
-
-
-def sonarr_url(r: queries.LibraryRow, base: str | None) -> str | None:
-    return fmt.sonarr_deeplink(base, r.series.title_slug if r.series else None)
+def sonarr_url(series: models.Series | None, base: str | None) -> str | None:
+    return fmt.sonarr_deeplink(base, series.title_slug if series else None)
 
 
 # --- TV grouping -----------------------------------------------------------
