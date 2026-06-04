@@ -122,8 +122,8 @@ templates.env.filters["dash"] = views.dash
 
 
 def slug(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return slug or "library"
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return s or "library"
 
 
 @dataclass(frozen=True, slots=True)
