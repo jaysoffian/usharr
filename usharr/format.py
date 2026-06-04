@@ -184,6 +184,8 @@ def badge(rel: str, alt: str) -> dict:
 
 
 def audio_base_badge(codec: str) -> dict | None:
+    # codec is the upper-cased output of norm_audio_codec (mediainfo.py);
+    # the tokens matched below must stay in sync with that vocabulary.
     if "EAC3" in codec:
         return badge("audio/codec/eac3.svg", "Dolby Digital Plus")
     if codec.startswith("TRUEHD"):
@@ -203,8 +205,6 @@ def audio_base_badge(codec: str) -> dict | None:
         return badge("audio/codec/aac.svg", "AAC")
     if codec == "FLAC":
         return badge("audio/codec/flac.svg", "FLAC")
-    if codec == "LPCM":
-        return badge("audio/codec/lpcm.svg", "LPCM")
     if codec == "PCM":
         return badge("audio/codec/pcm.svg", "PCM")
     if codec == "MP3":

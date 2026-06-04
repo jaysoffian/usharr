@@ -703,7 +703,6 @@ table.library .links a { margin-right: 6px; }
 .mi-badges img[src$="4k.svg"] { height: 12px; }
 .mi-badges img[src$="aac.svg"] { height: 16px; }
 .mi-badges img[src$="pcm.svg"] { height: 10px; }
-.mi-badges img[src$="lpcm.svg"] { height: 10px; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .mi-badges img {
     filter: invert(1);
