@@ -94,34 +94,35 @@ def render_row(
 ) -> FileRow:
     """Flatten one LibraryRow into a FileRow for the template. Absent overlays
     surface as None."""
-    p, mi, ar, s = r.plex, r.mediainfo, r.ardetector, r.series
-    audio, subs, movie = r.audio, r.subtitles, r.movie
-    path = r.video.path
-    rating_key = p.rating_key if p else None
+    plex, mi, ar, series, movie = (
+        r.plex,
+        r.mediainfo,
+        r.ardetector,
+        r.series,
+        r.movie,
+    )
+    rating_key = plex.rating_key if plex else None
     aspect_set = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None
     aspects, aspects_truncated = fmt.format_aspects_for_row(
         aspect_set, ar.aspect_primary if ar else None
     )
-    season = p.season_number if p else None
-    show_title = p.show_title if p else None
-    title = p.title if p else None
     return FileRow(
-        kind="episode" if season is not None else "movie",
-        path=path,
-        plex_title=title,
-        plex_show_title=show_title,
-        plex_season_number=season,
-        plex_episode_number=p.episode_number if p else None,
-        display_title=fmt.format_display_title(path, title, show_title),
-        plex_year=(p.year if p else None) or fmt.year_from_path(path),
-        edition=fmt.edition_from_path(path),
+        kind="episode" if r.plex_season_number is not None else "movie",
+        path=r.path,
+        plex_title=r.plex_title,
+        plex_show_title=r.plex_show_title,
+        plex_season_number=r.plex_season_number,
+        plex_episode_number=r.plex_episode_number,
+        display_title=fmt.format_display_title(r.path, r.plex_title, r.plex_show_title),
+        plex_year=(plex.year if plex else None) or fmt.year_from_path(r.path),
+        edition=fmt.edition_from_path(r.path),
         video_summary=fmt.format_video(
             mi.video_width if mi else None,
             mi.video_height if mi else None,
             mi.video_hdr if mi else None,
         ),
-        audio_summary=fmt.format_audio(audio),
-        sub_chip=fmt.format_sub_chip(subs),
+        audio_summary=fmt.format_audio(r.audio),
+        sub_chip=fmt.format_sub_chip(r.subtitles),
         has_error=bool((mi.error if mi else None) or (ar.error if ar else None)),
         aspects=aspects,
         aspects_truncated=aspects_truncated,
@@ -131,7 +132,9 @@ def render_row(
         radarr_url=fmt.radarr_deeplink(
             config.radarr.url, movie.tmdb_id if movie else None
         ),
-        sonarr_url=fmt.sonarr_deeplink(config.sonarr.url, s.title_slug if s else None),
+        sonarr_url=fmt.sonarr_deeplink(
+            config.sonarr.url, series.title_slug if series else None
+        ),
     )
 
 
