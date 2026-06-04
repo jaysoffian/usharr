@@ -6,10 +6,10 @@ Deep-link route:
 
 import logging
 
-import httpx
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from usharr import queries
+from usharr.arr import get_arr
 from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -33,38 +33,24 @@ class Movie(Model):
 MOVIES_ADAPTER: TypeAdapter[list[Movie]] = TypeAdapter(list[Movie])
 
 
-async def get_movies(base: str, api_key: str) -> list[Movie]:
-    url = f"{base.rstrip('/')}/api/v3/movie"
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        r = await client.get(url, headers={"X-Api-Key": api_key})
-    if r.status_code != 200:
-        msg = f"GET {url} → {r.status_code}"
-        raise RuntimeError(msg)
-    try:
-        return MOVIES_ADAPTER.validate_json(r.content)
-    except ValidationError as exc:
-        msg = f"bad radarr response: {exc}"
-        raise RuntimeError(msg) from exc
-
-
 async def sync() -> None:
     try:
-        r = get_config().radarr
-        if not r.url or not r.api_key:
+        cfg = get_config().radarr
+        if not cfg.url or not cfg.api_key:
             logger.info("radarr_sync: not configured; skipping")
             return
 
-        movies = await get_movies(r.url, r.api_key)
+        movies = await get_arr(MOVIES_ADAPTER, cfg.url, cfg.api_key, "movie")
 
         seen: set[int] = set()
-        for m in movies:
-            seen.add(m.id)
-            file_path = m.movie_file.path if m.movie_file else None
+        for item in movies:
+            seen.add(item.id)
+            file_path = item.movie_file.path if item.movie_file else None
             await queries.upsert_radarr_movie(
-                movie_id=m.id,
-                tmdb_id=m.tmdb_id,
+                movie_id=item.id,
+                tmdb_id=item.tmdb_id,
                 remote_path=file_path or None,
-                path_map=r.path_map,
+                path_map=cfg.path_map,
             )
 
         stale = sorted(await queries.list_radarr_movie_ids() - seen)
