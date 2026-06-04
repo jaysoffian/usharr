@@ -340,3 +340,48 @@ def detail_view(
         color=fmt.format_color(ar.color_pct if ar else None),
         error="; ".join(errors) if errors else None,
     )
+
+
+# --- detail-page track tables ---------------------------------------------
+
+
+@dataclass
+class AudioView:
+    """An audio track for the detail table: the model plus display strings."""
+
+    track: models.AudioTrack
+    details: str
+    lang_display: str
+    title_display: str
+
+
+@dataclass
+class SubtitleView:
+    """A subtitle track for the detail table: the model plus display strings."""
+
+    track: fmt.SubtitleTrack
+    lang_display: str
+    file_ext: str
+
+
+def annotate_tracks(
+    media_path: str,
+    audio: list[models.AudioTrack],
+    subtitle: list[fmt.SubtitleTrack],
+) -> tuple[list[AudioView], list[SubtitleView]]:
+    """Pair each audio/subtitle track with its computed display fields."""
+    audio_view = [
+        AudioView(
+            track=t,
+            details=fmt.format_audio_details(t),
+            lang_display=fmt.lang_name(t.language),
+            title_display=fmt.clean_audio_title(t.title, t.language),
+        )
+        for t in audio
+    ]
+    file_exts = fmt.subtitle_file_exts(media_path, subtitle)
+    subtitle_view = [
+        SubtitleView(track=t, lang_display=fmt.lang_name(t.language), file_ext=ext)
+        for t, ext in zip(subtitle, file_exts, strict=True)
+    ]
+    return audio_view, subtitle_view

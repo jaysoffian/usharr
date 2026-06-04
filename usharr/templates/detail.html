@@ -51,11 +51,11 @@
   <tbody>
   {% for t in audio %}
     <tr>
-      <td>{{ t.idx }}</td>
+      <td>{{ t.track.idx }}</td>
       <td>{{ t.lang_display }}</td>
       <td class="wrap">{{ t.title_display }}</td>
-      <td>{{ '✓' if t.is_default else '' }}</td>
-      <td>{{ '✓' if t.is_forced else '' }}</td>
+      <td>{{ '✓' if t.track.is_default else '' }}</td>
+      <td>{{ '✓' if t.track.is_forced else '' }}</td>
       <td>{{ t.details }}</td>
     </tr>
   {% endfor %}
@@ -75,12 +75,12 @@
   {% for t in subtitle %}
     <tr>
       <td>{{ loop.index }}</td>
-      <td>{{ t.codec or '?' }}</td>
+      <td>{{ t.track.codec or '?' }}</td>
       <td>{{ t.lang_display }}</td>
-      <td class="wrap">{{ t.title or '' }}</td>
-      <td>{{ '✓' if t.is_default else '' }}</td>
-      <td>{{ '✓' if t.is_forced else '' }}</td>
-      <td>{{ '✓' if t.is_sdh else '' }}</td>
+      <td class="wrap">{{ t.track.title or '' }}</td>
+      <td>{{ '✓' if t.track.is_default else '' }}</td>
+      <td>{{ '✓' if t.track.is_forced else '' }}</td>
+      <td>{{ '✓' if t.track.is_sdh else '' }}</td>
       <td class="path">{% if t.file_ext %}<code>{{ t.file_ext }}</code>{% endif %}</td>
     </tr>
   {% endfor %}

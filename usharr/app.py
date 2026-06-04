@@ -156,34 +156,6 @@ async def sonarr_url_for(sonarr_base: str | None, local_path: str) -> str | None
     return fmt.sonarr_deeplink(sonarr_base, series.title_slug if series else None)
 
 
-def annotate_tracks(
-    media_path: str,
-    audio: list[models.AudioTrack],
-    subtitle: list[fmt.SubtitleTrack],
-) -> tuple[list[dict], list[dict]]:
-    """Build template-facing audio/subtitle dicts with display fields attached."""
-    audio_view = [
-        {
-            **t.model_dump(),
-            "details": fmt.format_audio_details(t),
-            "lang_display": fmt.lang_name(t.language),
-            "title_display": fmt.clean_audio_title(t.title, t.language),
-        }
-        for t in audio
-    ]
-    file_exts = fmt.subtitle_file_exts(media_path, subtitle)
-    subtitle_view = [
-        {
-            **t.model_dump(),
-            "subtitle_path": getattr(t, "subtitle_path", None),
-            "lang_display": fmt.lang_name(t.language),
-            "file_ext": ext,
-        }
-        for t, ext in zip(subtitle, file_exts, strict=True)
-    ]
-    return audio_view, subtitle_view
-
-
 # --- /api/info response models --------------------------------------------
 
 
@@ -413,7 +385,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     audio_rows = await queries.get_audio_tracks(path)
     internal_subs, external_subs = await queries.get_subtitle_tracks(path)
     subtitle_rows = [*internal_subs, *external_subs]
-    audio_view, subtitle_view = annotate_tracks(path, audio_rows, subtitle_rows)
+    audio_view, subtitle_view = views.annotate_tracks(path, audio_rows, subtitle_rows)
     plex_item = await queries.get_plex_item_by_local_path(path)
     mi = await queries.get_mediainfo(path)
     ar = await queries.get_ardetector(path)
@@ -442,7 +414,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             ear = await queries.get_ardetector(ep)
             ea = await queries.get_audio_tracks(ep)
             ei, ex = await queries.get_subtitle_tracks(ep)
-            ea_view, es_view = annotate_tracks(ep, ea, [*ei, *ex])
+            ea_view, es_view = views.annotate_tracks(ep, ea, [*ei, *ex])
             eset = (
                 json.loads(ear.aspect_samples) if ear and ear.aspect_samples else None
             )
