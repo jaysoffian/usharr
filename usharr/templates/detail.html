@@ -1,22 +1,24 @@
 {% extends "base.html" %}
 {% block title %}{{ display_title }} — usharr{% endblock %}
 
-{% macro item_grid(mf, audio, subtitle, aspect_set, duration_str) %}
+{% macro item_grid(mf, mi, ar, audio, subtitle, sub_exts, aspect_set, duration_str) %}
 <div class="detail-grid">
 
 <section>
 <h3>Video</h3>
 <table class="kv">
-  <tr><th>Codec</th><td>{{ mf.video_codec or '—' }}</td></tr>
-  <tr><th>Profile</th><td>{{ mf.video_profile or '—' }}</td></tr>
-  {% set bucket = resolution_bucket(mf.video_width, mf.video_height) %}
-  <tr><th>Resolution</th><td>{{ (mf.video_width or '?')|string + '×' + (mf.video_height or '?')|string }}{% if bucket %} <span class="subtle">({{ bucket }})</span>{% endif %}</td></tr>
-  <tr><th>Bit depth</th><td>{{ (mf.video_bit_depth|string + ' bit') if mf.video_bit_depth else '—' }}</td></tr>
-  <tr><th>HDR</th><td>{{ mf.video_hdr or '—' }}{% if mf.video_hdr_format %}<div class="subtle">{{ mf.video_hdr_format }}</div>{% endif %}</td></tr>
-  <tr><th>Color</th><td>{{ mf.color }}</td></tr>
-  <tr><th>Frame rate</th><td>{{ mf.video_frame_rate or '—' }}</td></tr>
-  <tr><th>Bit rate</th><td>{{ ('%.1f Mbps' % (mf.video_bit_rate / 1000000)) if mf.video_bit_rate else '—' }}{% if mf.video_max_bit_rate %} <span class="subtle">({{ '%.1f' % (mf.video_max_bit_rate / 1000000) }} max)</span>{% endif %}</td></tr>
-  <tr><th>Container</th><td>{{ mf.container or '—' }}</td></tr>
+  <tr><th>Codec</th><td>{{ (mi.video_codec if mi else None)|dash }}</td></tr>
+  <tr><th>Profile</th><td>{{ (mi.video_profile if mi else None)|dash }}</td></tr>
+  {% set vw = mi.video_width if mi else None %}
+  {% set vh = mi.video_height if mi else None %}
+  {% set bucket = resolution_bucket(vw, vh) %}
+  <tr><th>Resolution</th><td>{{ (vw or '?')|string + '×' + (vh or '?')|string }}{% if bucket %} <span class="subtle">({{ bucket }})</span>{% endif %}</td></tr>
+  <tr><th>Bit depth</th><td>{{ (mi.video_bit_depth|string + ' bit') if mi and mi.video_bit_depth else '—' }}</td></tr>
+  <tr><th>HDR</th><td>{{ (mi.video_hdr if mi else None)|dash }}{% if mi and mi.video_hdr_format %}<div class="subtle">{{ mi.video_hdr_format }}</div>{% endif %}</td></tr>
+  <tr><th>Color</th><td>{{ color(ar) }}</td></tr>
+  <tr><th>Frame rate</th><td>{{ (mi.video_frame_rate if mi else None)|dash }}</td></tr>
+  <tr><th>Bit rate</th><td>{{ ('%.1f Mbps' % (mi.video_bit_rate / 1000000)) if mi and mi.video_bit_rate else '—' }}{% if mi and mi.video_max_bit_rate %} <span class="subtle">({{ '%.1f' % (mi.video_max_bit_rate / 1000000) }} max)</span>{% endif %}</td></tr>
+  <tr><th>Container</th><td>{{ (mi.container if mi else None)|dash }}</td></tr>
   <tr><th>Duration</th><td>{{ duration_str }}</td></tr>
 </table>
 </section>
@@ -28,7 +30,7 @@
   <thead><tr><th>AR</th><th>% runtime</th></tr></thead>
   <tbody>
   {% for a in aspect_set %}
-    <tr class="{{ 'primary' if a.aspect == mf.aspect_primary else '' }}">
+    <tr class="{{ 'primary' if ar and a.aspect == ar.aspect_primary else '' }}">
       <td>{{ '%.2f' % a.aspect }}</td>
       <td>{{ '%.0f%%' % (a.percentage * 100) }}</td>
     </tr>
@@ -51,12 +53,12 @@
   <tbody>
   {% for t in audio %}
     <tr>
-      <td>{{ t.track.idx }}</td>
-      <td>{{ t.lang_display }}</td>
-      <td class="wrap">{{ t.title_display }}</td>
-      <td>{{ '✓' if t.track.is_default else '' }}</td>
-      <td>{{ '✓' if t.track.is_forced else '' }}</td>
-      <td>{{ t.details }}</td>
+      <td>{{ t.idx }}</td>
+      <td>{{ audio_lang(t) }}</td>
+      <td class="wrap">{{ audio_title(t) }}</td>
+      <td>{{ '✓' if t.is_default else '' }}</td>
+      <td>{{ '✓' if t.is_forced else '' }}</td>
+      <td>{{ audio_details(t) }}</td>
     </tr>
   {% endfor %}
   </tbody>
@@ -75,13 +77,13 @@
   {% for t in subtitle %}
     <tr>
       <td>{{ loop.index }}</td>
-      <td>{{ t.track.codec or '?' }}</td>
-      <td>{{ t.lang_display }}</td>
-      <td class="wrap">{{ t.track.title or '' }}</td>
-      <td>{{ '✓' if t.track.is_default else '' }}</td>
-      <td>{{ '✓' if t.track.is_forced else '' }}</td>
-      <td>{{ '✓' if t.track.is_sdh else '' }}</td>
-      <td class="path">{% if t.file_ext %}<code>{{ t.file_ext }}</code>{% endif %}</td>
+      <td>{{ t.codec or '?' }}</td>
+      <td>{{ sub_lang(t) }}</td>
+      <td class="wrap">{{ t.title or '' }}</td>
+      <td>{{ '✓' if t.is_default else '' }}</td>
+      <td>{{ '✓' if t.is_forced else '' }}</td>
+      <td>{{ '✓' if t.is_sdh else '' }}</td>
+      <td class="path">{% if sub_exts[loop.index0] %}<code>{{ sub_exts[loop.index0] }}</code>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
@@ -92,8 +94,9 @@
 </section>
 
 </div>
-{% if mf.error %}
-<pre class="err">{{ mf.error }}</pre>
+{% set err = detail_error(mi, ar) %}
+{% if err %}
+<pre class="err">{{ err }}</pre>
 {% endif %}
 {% endmacro %}
 
@@ -154,7 +157,7 @@
   <div class="path"><code>{{ mf.path }}</code></div>
 </header>
 
-{{ item_grid(mf, audio, subtitle, aspect_set, duration_str) }}
+{{ item_grid(mf, mi, ar, audio, subtitle, sub_exts, aspect_set, duration_str) }}
 
 {% for e in extras %}
 <hr class="extra-sep">
@@ -162,7 +165,7 @@
   <h2>{{ e.display_title }}{% if e.edition %} <span class="edition">{{ e.edition }}</span>{% endif %}{% if e.year %} <span class="year">({{ e.year }})</span>{% endif %}</h2>
   <div class="path"><code>{{ e.mf.path }}</code></div>
 </header>
-{{ item_grid(e.mf, e.audio, e.subtitle, e.aspect_set, e.duration_str) }}
+{{ item_grid(e.mf, e.mi, e.ar, e.audio, e.subtitle, e.sub_exts, e.aspect_set, e.duration_str) }}
 {% endfor %}
 
 <script>
