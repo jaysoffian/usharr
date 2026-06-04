@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from oxyde_admin import FastAPIAdmin
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from usharr import database, models, plex, probers, queries
 from usharr import format as fmt
@@ -395,16 +395,20 @@ def annotate_tracks(
 
 
 class VideoInfo(BaseModel):
-    codec: str | None = None
-    profile: str | None = None
-    width: int | None = None
-    height: int | None = None
-    bit_depth: int | None = None
-    hdr: str | None = None
-    hdr_format: str | None = None
-    frame_rate: float | None = None
-    bit_rate: int | None = None
-    max_bit_rate: int | None = None
+    # validation_alias lets this validate straight off a Mediainfo row
+    # (`video_*` columns) while serializing under the public, unprefixed names.
+    codec: str | None = Field(default=None, validation_alias="video_codec")
+    profile: str | None = Field(default=None, validation_alias="video_profile")
+    width: int | None = Field(default=None, validation_alias="video_width")
+    height: int | None = Field(default=None, validation_alias="video_height")
+    bit_depth: int | None = Field(default=None, validation_alias="video_bit_depth")
+    hdr: str | None = Field(default=None, validation_alias="video_hdr")
+    hdr_format: str | None = Field(default=None, validation_alias="video_hdr_format")
+    frame_rate: float | None = Field(default=None, validation_alias="video_frame_rate")
+    bit_rate: int | None = Field(default=None, validation_alias="video_bit_rate")
+    max_bit_rate: int | None = Field(
+        default=None, validation_alias="video_max_bit_rate"
+    )
 
 
 class AspectSample(BaseModel):
@@ -448,18 +452,7 @@ async def build_info(mf: models.VideoFile) -> InfoResponse:
         ardetector_error=ar.error if ar else None,
         container=mi.container if mi else None,
         duration=mi.duration if mi else None,
-        video=VideoInfo(
-            codec=mi.video_codec if mi else None,
-            profile=mi.video_profile if mi else None,
-            width=mi.video_width if mi else None,
-            height=mi.video_height if mi else None,
-            bit_depth=mi.video_bit_depth if mi else None,
-            hdr=mi.video_hdr if mi else None,
-            hdr_format=mi.video_hdr_format if mi else None,
-            frame_rate=mi.video_frame_rate if mi else None,
-            bit_rate=mi.video_bit_rate if mi else None,
-            max_bit_rate=mi.video_max_bit_rate if mi else None,
-        ),
+        video=VideoInfo.model_validate(mi, from_attributes=True) if mi else VideoInfo(),
         aspect=AspectInfo(
             primary=ar.aspect_primary if ar else None,
             widest=ar.aspect_widest if ar else None,

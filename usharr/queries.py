@@ -14,7 +14,6 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from oxyde.db import transaction
 from oxyde.queries.raw import execute_raw
@@ -251,75 +250,82 @@ async def replace_external_subtitles(
 
 @dataclass(frozen=True, slots=True)
 class LibraryRow:
-    """Flat per-file view for the library grid: video_file joined with its
-    mediainfo / ardetector / plex_item overlays (NULL fields ⇒ no such row) and
-    the Series whose folder contains it. Assembled from the ORM models; the
-    template and grouping logic read it. Owns the grid's read queries.
+    """One library-grid file: its video_file plus the optional mediainfo /
+    ardetector / plex_item overlays and the Series whose folder contains it. The
+    properties expose the null-safe flat fields the grid, sort key, and
+    detail-page navigation read; the detail page and /api/info read the models
+    directly. Owns the grid's read queries.
     """
 
-    path: str
-    size_bytes: int
-    mtime_ns: int
-    mediainfo_error: str | None = None
-    container: str | None = None
-    duration: float | None = None
-    video_codec: str | None = None
-    video_profile: str | None = None
-    video_width: int | None = None
-    video_height: int | None = None
-    video_bit_depth: int | None = None
-    video_hdr: str | None = None
-    video_hdr_format: str | None = None
-    video_frame_rate: float | None = None
-    video_bit_rate: int | None = None
-    video_max_bit_rate: int | None = None
-    ardetector_error: str | None = None
-    aspect_primary: float | None = None
-    aspect_widest: float | None = None
-    aspect_samples: str | None = None
-    color_pct: float | None = None
-    plex_rating_key: str | None = None
-    plex_type: str | None = None
-    plex_title: str | None = None
-    plex_year: int | None = None
-    plex_show_title: str | None = None
-    plex_season_number: int | None = None
-    plex_episode_number: int | None = None
-    series_id: int | None = None
-    series_slug: str | None = None
+    video: VideoFile
+    mediainfo: Mediainfo | None
+    ardetector: Ardetector | None
+    plex: PlexItem | None
+    series: Series | None
 
-    @classmethod
-    def from_models(
-        cls,
-        v: VideoFile,
-        m: Mediainfo | None,
-        a: Ardetector | None,
-        p: PlexItem | None,
-        s: Series | None,
-    ) -> LibraryRow:
-        """Flatten a video_file and its (optional) overlay rows into one grid
-        row. Absent overlays leave their columns at the None default. The
-        mediainfo/ardetector/plex column names mirror the model fields, so they
-        flatten straight from ``model_dump`` (error gets a per-source prefix,
-        plex columns a ``plex_`` prefix)."""
-        drop = {"id", "video", "video_path", "error"}
-        fields: dict[str, Any] = {
-            "path": v.path,
-            "size_bytes": v.size_bytes,
-            "mtime_ns": v.mtime_ns,
-        }
-        if m is not None:
-            fields |= m.model_dump(exclude=drop) | {"mediainfo_error": m.error}
-        if a is not None:
-            fields |= a.model_dump(exclude=drop) | {"ardetector_error": a.error}
-        if p is not None:
-            fields |= {
-                f"plex_{k}": val
-                for k, val in p.model_dump(exclude={"video", "video_path"}).items()
-            }
-        if s is not None:
-            fields |= {"series_id": s.id, "series_slug": s.title_slug}
-        return cls(**fields)
+    @property
+    def path(self) -> str:
+        return self.video.path
+
+    @property
+    def mediainfo_error(self) -> str | None:
+        return self.mediainfo.error if self.mediainfo else None
+
+    @property
+    def ardetector_error(self) -> str | None:
+        return self.ardetector.error if self.ardetector else None
+
+    @property
+    def video_width(self) -> int | None:
+        return self.mediainfo.video_width if self.mediainfo else None
+
+    @property
+    def video_height(self) -> int | None:
+        return self.mediainfo.video_height if self.mediainfo else None
+
+    @property
+    def video_hdr(self) -> str | None:
+        return self.mediainfo.video_hdr if self.mediainfo else None
+
+    @property
+    def aspect_primary(self) -> float | None:
+        return self.ardetector.aspect_primary if self.ardetector else None
+
+    @property
+    def aspect_samples(self) -> str | None:
+        return self.ardetector.aspect_samples if self.ardetector else None
+
+    @property
+    def plex_rating_key(self) -> str | None:
+        return self.plex.rating_key if self.plex else None
+
+    @property
+    def plex_title(self) -> str | None:
+        return self.plex.title if self.plex else None
+
+    @property
+    def plex_year(self) -> int | None:
+        return self.plex.year if self.plex else None
+
+    @property
+    def plex_show_title(self) -> str | None:
+        return self.plex.show_title if self.plex else None
+
+    @property
+    def plex_season_number(self) -> int | None:
+        return self.plex.season_number if self.plex else None
+
+    @property
+    def plex_episode_number(self) -> int | None:
+        return self.plex.episode_number if self.plex else None
+
+    @property
+    def series_id(self) -> int | None:
+        return self.series.id if self.series else None
+
+    @property
+    def series_slug(self) -> str | None:
+        return self.series.title_slug if self.series else None
 
     @staticmethod
     def _series_for(path: str, by_folder: dict[str, Series]) -> Series | None:
@@ -373,7 +379,7 @@ class LibraryRow:
         mi, ar, plex = await cls._overlays(path_prefix)
         series_by_folder = {s.video_folder: s for s in await Series.objects.all()}
         return [
-            cls.from_models(
+            cls(
                 v,
                 mi.get(v.path),
                 ar.get(v.path),
