@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from functools import cache
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, overload
 from urllib.parse import quote
 
 from fastapi import APIRouter, FastAPI, Form, HTTPException, Request, Response
@@ -199,9 +199,21 @@ class InfoByContentIdResponse(InfoResponse):
     plex_files: list[str]
 
 
-async def build_info[T: InfoResponse](
-    mf: models.VideoFile, response_cls: type[T], **extra: Any
-) -> T:
+@overload
+async def build_info(
+    mf: models.VideoFile,
+    response_cls: type[InfoByContentIdResponse],
+    *,
+    plex_content_id: str,
+    plex_files: list[str],
+) -> InfoByContentIdResponse: ...
+@overload
+async def build_info(
+    mf: models.VideoFile, response_cls: type[InfoResponse]
+) -> InfoResponse: ...
+async def build_info(
+    mf: models.VideoFile, response_cls: type[InfoResponse], **extra: Any
+) -> InfoResponse:
     path = mf.path
     mi = await queries.get_mediainfo(path)
     ar = await queries.get_ardetector(path)
