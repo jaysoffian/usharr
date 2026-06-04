@@ -7,6 +7,7 @@ import os
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -102,37 +103,25 @@ def slug(name: str) -> str:
     return slug or "library"
 
 
-def libraries() -> list[dict]:
+@dataclass(frozen=True, slots=True)
+class Library:
+    slug: str
+    label: str
+    paths: list[str]
+
+
+def libraries() -> list[Library]:
     return [
-        {"slug": slug(name), "label": name, "paths": list(paths)}
+        Library(slug=slug(name), label=name, paths=list(paths))
         for name, paths in get_config().library.items()
     ]
 
 
-def library_by_slug(slug: str) -> dict | None:
+def library_by_slug(slug: str) -> Library | None:
     for lib in libraries():
-        if lib["slug"] == slug:
+        if lib.slug == slug:
             return lib
     return None
-
-
-async def library_rows_for(lib: dict) -> list[queries.LibraryRow]:
-    rows: list[queries.LibraryRow] = []
-    for p in lib["paths"]:
-        rows.extend(await queries.LibraryRow.for_prefix(p))
-    return rows
-
-
-async def library_tracks_for(
-    lib: dict,
-) -> tuple[dict[str, list], dict[str, list]]:
-    audio: dict[str, list] = {}
-    subs: dict[str, list] = {}
-    for p in lib["paths"]:
-        a, s = await queries.LibraryRow.tracks_for_prefix(p)
-        audio.update(a)
-        subs.update(s)
-    return audio, subs
 
 
 # Plex's standard "extras" subdirectory names. A file under any of these
@@ -349,7 +338,7 @@ async def index() -> RedirectResponse:
     libs = libraries()
     if not libs:
         raise HTTPException(status_code=500, detail="no library configured")
-    return RedirectResponse(url=f"/library/{libs[0]['slug']}", status_code=302)
+    return RedirectResponse(url=f"/library/{libs[0].slug}", status_code=302)
 
 
 @app.get("/library/{slug}", response_class=HTMLResponse, include_in_schema=False)
@@ -358,34 +347,24 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     if lib is None:
         raise HTTPException(status_code=404, detail=f"no library {slug!r}")
 
-    all_rows = await library_rows_for(lib)
-    raw_rows = sorted(
-        (r for r in all_rows if not is_extra(r.path)),
+    rows_data = await queries.library_rows(lib.paths)
+    rows_data = sorted(
+        (r for r in rows_data if not is_extra(r.path)),
         key=views.library_sort_key,
     )
-    audio_by_path, sub_by_path = await library_tracks_for(lib)
 
     config = get_config()
     machine_id = await plex.get_machine_identifier()
     server_url = config.plex.url or await plex.get_server_url()
 
-    # Radarr movie overlay (tmdb + radarr id) keyed by local path; one query
-    # per library root. Series + Sonarr slug come pre-joined on each row.
-    movies: dict[str, models.Movie] = {}
-    for p in lib["paths"]:
-        movies.update(await queries.LibraryRow.movies_for_prefix(p))
-
     file_rows = [
         views.render_row(
             r,
-            audio=audio_by_path.get(r.path, []),
-            subs=sub_by_path.get(r.path, []),
-            movie=movies.get(r.path),
             config=config,
             server_url=server_url,
             machine_id=machine_id,
         )
-        for r in raw_rows
+        for r in rows_data
     ]
     is_tv = any(row.kind == "episode" for row in file_rows)
     # TV libraries: roll episodes up under show + season header rows.
@@ -419,7 +398,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
         request,
         "library.html",
         {
-            "label": lib["label"],
+            "label": lib.label,
             "rows": rows,
             "titles": titles,
             "episodes": episodes,
@@ -438,7 +417,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     if mf is None:
         raise HTTPException(status_code=404, detail=f"no record for {path}")
     lib = next(
-        (lib for lib in libraries() if any(path.startswith(p) for p in lib["paths"])),
+        (lib for lib in libraries() if any(path.startswith(p) for p in lib.paths)),
         None,
     )
     prev_path: str | None = None
@@ -452,7 +431,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
         # Use the same sort as the library page so Prev/Next feels
         # consistent. Hops over bonus features (extras).
         ordered = sorted(
-            (r for r in await library_rows_for(lib) if not is_extra(r.path)),
+            (r for r in await queries.library_rows(lib.paths) if not is_extra(r.path)),
             key=views.library_sort_key,
         )
         paths = [r.path for r in ordered]
@@ -543,8 +522,8 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             "sonarr_url": await sonarr_url_for(config.sonarr.url, path),
             "extras": extras,
             "libraries": libraries(),
-            "current_slug": lib["slug"] if lib else "",
-            "library_label": lib["label"] if lib else "Library",
+            "current_slug": lib.slug if lib else "",
+            "library_label": lib.label if lib else "Library",
             "prev_path": prev_path,
             "next_path": next_path,
             "prev_season_path": prev_season_path,

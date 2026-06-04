@@ -88,9 +88,6 @@ def bazarr_link(
 def render_row(
     r: queries.LibraryRow,
     *,
-    audio: list,
-    subs: list,
-    movie: models.Movie | None,
     config: Config,
     server_url: str | None,
     machine_id: str | None,
@@ -98,6 +95,7 @@ def render_row(
     """Flatten one LibraryRow into a FileRow for the template. Absent overlays
     surface as None."""
     p, mi, ar, s = r.plex, r.mediainfo, r.ardetector, r.series
+    audio, subs, movie = r.audio, r.subtitles, r.movie
     path = r.video.path
     rating_key = p.rating_key if p else None
     aspect_set = json.loads(ar.aspect_samples) if ar and ar.aspect_samples else None

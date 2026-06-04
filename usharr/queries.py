@@ -251,11 +251,11 @@ async def replace_external_subtitles(
 @dataclass(frozen=True, slots=True)
 class LibraryRow:
     """One library-grid file: its video_file plus the optional mediainfo /
-    ardetector / plex_item overlays and the Series whose folder contains it.
-    Holds the source models; the accessors expose only the identity + plex
-    show/season/episode ordering keys that sorting and prev/next navigation
-    need. Presentation (the grid's formatted columns + deep-links) is built
-    from the models in ``usharr.views``. Owns the grid's read queries.
+    ardetector / plex_item / movie overlays, the audio + internal-subtitle
+    tracks, and the Series whose folder contains it. Holds the source models;
+    the accessors expose only the identity + plex show/season/episode ordering
+    keys that sorting and prev/next navigation need. Presentation (the grid's
+    formatted columns + deep-links) is built from the models in ``usharr.views``.
     """
 
     video: VideoFile
@@ -263,6 +263,9 @@ class LibraryRow:
     ardetector: Ardetector | None
     plex: PlexItem | None
     series: Series | None
+    movie: Movie | None
+    audio: list[AudioTrack]
+    subtitles: list[SubtitleTrackInternal]
 
     @property
     def path(self) -> str:
@@ -284,100 +287,89 @@ class LibraryRow:
     def plex_episode_number(self) -> int | None:
         return self.plex.episode_number if self.plex else None
 
-    @staticmethod
-    def _series_for(path: str, by_folder: dict[str, Series]) -> Series | None:
-        """The Series whose video_folder is the deepest ancestor of ``path`` —
-        the read-time, structure-agnostic file→series link."""
-        p = Path(path).parent
-        while True:
-            if (s := by_folder.get(str(p))) is not None:
-                return s
-            parent = p.parent
-            if parent == p:
-                return None
-            p = parent
 
-    @classmethod
-    async def _overlays(
-        cls, path_prefix: str
-    ) -> tuple[dict[str, Mediainfo], dict[str, Ardetector], dict[str, PlexItem]]:
+def _series_for(path: str, by_folder: dict[str, Series]) -> Series | None:
+    """The Series whose video_folder is the deepest ancestor of ``path`` —
+    the read-time, structure-agnostic file→series link."""
+    p = Path(path).parent
+    while True:
+        if (s := by_folder.get(str(p))) is not None:
+            return s
+        parent = p.parent
+        if parent == p:
+            return None
+        p = parent
+
+
+async def library_rows(paths: list[str]) -> list[LibraryRow]:
+    """Every library-grid file under any of ``paths``, fully populated.
+
+    Pulls the video_file rows plus their mediainfo / ardetector / plex_item /
+    movie overlays and audio + internal-subtitle tracks, keyed by video_path,
+    and resolves each file's Series by folder prefix. One LibraryRow per
+    video_file. Order is by path within each prefix; the grid's final sort is
+    the view's job (``views.library_sort_key``).
+    """
+    series_by_folder = {s.video_folder: s for s in await Series.objects.all()}
+    rows: list[LibraryRow] = []
+    for prefix in paths:
+        videos = (
+            await VideoFile.objects.filter(path__startswith=prefix)
+            .order_by("path")
+            .all()
+        )
         mi = {
             m.video_path: m
-            for m in await Mediainfo.objects.filter(
-                video_path__startswith=path_prefix
-            ).all()
+            for m in await Mediainfo.objects.filter(video_path__startswith=prefix).all()
             if m.video_path
         }
         ar = {
             a.video_path: a
             for a in await Ardetector.objects.filter(
-                video_path__startswith=path_prefix
+                video_path__startswith=prefix
             ).all()
             if a.video_path
         }
         plex = {
             p.video_path: p
-            for p in await PlexItem.objects.filter(
-                video_path__startswith=path_prefix
-            ).all()
+            for p in await PlexItem.objects.filter(video_path__startswith=prefix).all()
             if p.video_path
         }
-        return mi, ar, plex
-
-    @classmethod
-    async def for_prefix(cls, path_prefix: str) -> list[LibraryRow]:
-        """video_file LEFT JOIN mediainfo / ardetector / plex_item, plus the
-        Series its folder contains (resolved by prefix), as flat rows."""
-        videos = (
-            await VideoFile.objects.filter(path__startswith=path_prefix)
-            .order_by("path")
-            .all()
-        )
-        mi, ar, plex = await cls._overlays(path_prefix)
-        series_by_folder = {s.video_folder: s for s in await Series.objects.all()}
-        return [
-            cls(
-                v,
-                mi.get(v.path),
-                ar.get(v.path),
-                plex.get(v.path),
-                cls._series_for(v.path, series_by_folder),
-            )
-            for v in videos
-        ]
-
-    @classmethod
-    async def tracks_for_prefix(
-        cls, path_prefix: str
-    ) -> tuple[dict[str, list[AudioTrack]], dict[str, list[SubtitleTrackInternal]]]:
-        """(audio_by_path, internal_subtitle_by_path) for every file under prefix."""
-        audio = (
-            await AudioTrack.objects.filter(video_path__startswith=path_prefix)
-            .order_by("video_path", "idx")
-            .all()
-        )
-        subs = (
-            await SubtitleTrackInternal.objects.filter(
-                video_path__startswith=path_prefix
-            )
-            .order_by("video_path", "idx")
-            .all()
-        )
+        movies = {
+            m.video_path: m
+            for m in await Movie.objects.filter(video_path__startswith=prefix).all()
+            if m.video_path
+        }
         audio_by: dict[str, list[AudioTrack]] = {}
-        for a in audio:
+        for a in (
+            await AudioTrack.objects.filter(video_path__startswith=prefix)
+            .order_by("video_path", "idx")
+            .all()
+        ):
             if a.video_path:
                 audio_by.setdefault(a.video_path, []).append(a)
         sub_by: dict[str, list[SubtitleTrackInternal]] = {}
-        for s in subs:
+        for s in (
+            await SubtitleTrackInternal.objects.filter(video_path__startswith=prefix)
+            .order_by("video_path", "idx")
+            .all()
+        ):
             if s.video_path:
                 sub_by.setdefault(s.video_path, []).append(s)
-        return audio_by, sub_by
-
-    @classmethod
-    async def movies_for_prefix(cls, path_prefix: str) -> dict[str, Movie]:
-        """Radarr movie overlay keyed by local path (for Radarr + Bazarr links)."""
-        rows = await Movie.objects.filter(video_path__startswith=path_prefix).all()
-        return {m.video_path: m for m in rows if m.video_path}
+        rows.extend(
+            LibraryRow(
+                video=v,
+                mediainfo=mi.get(v.path),
+                ardetector=ar.get(v.path),
+                plex=plex.get(v.path),
+                series=_series_for(v.path, series_by_folder),
+                movie=movies.get(v.path),
+                audio=audio_by.get(v.path, []),
+                subtitles=sub_by.get(v.path, []),
+            )
+            for v in videos
+        )
+    return rows
 
 
 # --- plex_item ------------------------------------------------------------

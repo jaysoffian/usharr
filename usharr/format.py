@@ -2,6 +2,7 @@
 
 import os
 import re
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 
@@ -562,7 +563,7 @@ SUB_FORMAT_PREF = {
 }
 
 
-def format_sub_chip(subtitle_tracks: list[SubtitleTrack]) -> dict | None:
+def format_sub_chip(subtitle_tracks: Sequence[SubtitleTrack]) -> dict | None:
     """The single best English-sub chip, or None if no English subs.
 
     Tier priority: text-based non-SDH > text-based SDH > raster
