@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from usharr import format as fmt
 from usharr import models, queries
+from usharr.audio_title import clean_audio_title
 from usharr.config import BazarrConfig, Config
 
 JUMP_LETTERS: tuple[str, ...] = ("#", *(chr(c) for c in range(ord("A"), ord("Z") + 1)))
@@ -369,7 +370,7 @@ def audio_lang(t: models.AudioTrack) -> str:
 
 
 def audio_title(t: models.AudioTrack) -> str:
-    return fmt.clean_audio_title(t.title, t.language)
+    return clean_audio_title(t.title, t.language)
 
 
 def audio_details(t: models.AudioTrack) -> str:
