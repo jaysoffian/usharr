@@ -48,6 +48,9 @@ class SubtitleFile(Model):
     class Meta:
         is_table = True
         table_name = "subtitle_file"
+        indexes: ClassVar[list[Index]] = [
+            Index(("video_path",), name="subtitle_file_video_idx")
+        ]
 
 
 class Mediainfo(Model):
@@ -169,7 +172,7 @@ class SubtitleTrackExternal(Model):
 
 class PlexItem(Model):
     rating_key: str = Field(db_pk=True, db_type="TEXT")
-    type: str = Field(db_type="TEXT", db_index=True)
+    type: str = Field(db_type="TEXT")
     title: str | None = Field(default=None, db_type="TEXT")
     year: int | None = None
     show_title: str | None = Field(default=None, db_type="TEXT")
@@ -183,6 +186,9 @@ class PlexItem(Model):
     class Meta:
         is_table = True
         table_name = "plex_item"
+        indexes: ClassVar[list[Index]] = [
+            Index(("video_path",), name="plex_item_video_idx")
+        ]
 
 
 class Movie(Model):
@@ -200,6 +206,9 @@ class Movie(Model):
     class Meta:
         is_table = True
         table_name = "movie"
+        indexes: ClassVar[list[Index]] = [
+            Index(("video_path",), name="movie_video_idx")
+        ]
 
 
 class Series(Model):
