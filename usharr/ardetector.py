@@ -124,19 +124,11 @@ class DetectionResult:
     detected: list[DetectedAR]
     duration: float
     sar: float
-    samples_probed: int
-    samples_valid: int
     # Fraction of samples that looked like color (SATMAX ≥ threshold). 1.0
     # = all color; 0.0 = pure monochrome; mid-range = mixed (e.g. a B&W
     # episode with a colored studio bumper). None when no sample produced
     # a usable SATMAX reading.
     color_pct: float | None = None
-    segment_count: int = 0
-    # Raw histograms kept for debug visibility only; detection uses the
-    # chronological timeline and temporal-adjacency segmentation.
-    ar_histogram: list[tuple[float, int]] = field(default_factory=list)
-    width_histogram: list[tuple[int, int]] = field(default_factory=list)
-    height_histogram: list[tuple[int, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -170,11 +162,6 @@ class VideoInfo:
     # (timestamp_sec, ar_calculated) for every sample that passed plausibility,
     # in chronological order. Temporal-adjacency clustering uses this directly.
     timeline: list[tuple[int, float]] = field(default_factory=list)
-
-    # Histograms kept for debug visibility only; detection uses `timeline`.
-    ar_map: dict[float, int] = field(default_factory=dict)
-    width_map: dict[int, int] = field(default_factory=dict)
-    height_map: dict[int, int] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
@@ -511,9 +498,6 @@ def record_sample(
         return False
 
     vi.timeline.append((t_sec, ar_calculated))
-    vi.ar_map[ar_calculated] = vi.ar_map.get(ar_calculated, 0) + 1
-    vi.height_map[height] = vi.height_map.get(height, 0) + 1
-    vi.width_map[width] = vi.width_map.get(width, 0) + 1
     vi.sample_count += 1
     logger.debug(
         "%s: accept: t=%ds sampleCount=%d ar=%s",
@@ -1029,10 +1013,6 @@ async def detect(path: Path) -> DetectionResult:
         vi.ar_sample,
     )
 
-    ar_hist = sorted(vi.ar_map.items(), key=lambda kv: (-kv[1], kv[0]))
-    w_hist = sorted(vi.width_map.items(), key=lambda kv: (-kv[1], kv[0]))
-    h_hist = sorted(vi.height_map.items(), key=lambda kv: (-kv[1], kv[0]))
-
     color_pct = vi.color_samples / vi.chroma_samples if vi.chroma_samples > 0 else None
     if color_pct is not None:
         logger.info(
@@ -1049,13 +1029,7 @@ async def detect(path: Path) -> DetectionResult:
         detected=detected,
         duration=float(vi.duration),
         sar=vi.ar_sample,
-        samples_probed=sample_counter,
-        samples_valid=vi.sample_count,
         color_pct=color_pct,
-        segment_count=len(segments),
-        ar_histogram=ar_hist,
-        width_histogram=w_hist,
-        height_histogram=h_hist,
     )
 
 
