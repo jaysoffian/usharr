@@ -11,7 +11,7 @@ its external tracks.
 """
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -301,14 +301,50 @@ def _series_for(path: str, by_folder: dict[str, Series]) -> Series | None:
         p = parent
 
 
-async def library_rows(paths: list[str]) -> list[LibraryRow]:
-    """Every library-grid file under any of ``paths``, fully populated.
+# Plex's standard "extras" subdirectory names. A file under any of these (at
+# any depth) is a bonus feature of the parent title, not a title of its own, so
+# it never appears as a library-grid row.
+EXTRAS_DIRS = frozenset(
+    {
+        "behindthescenes",
+        "behind the scenes",
+        "deleted",
+        "deleted scenes",
+        "extra",
+        "extras",
+        "featurette",
+        "featurettes",
+        "interview",
+        "interviews",
+        "other",
+        "sample",
+        "samples",
+        "scenes",
+        "short",
+        "shorts",
+        "trailer",
+        "trailers",
+    },
+)
+
+
+def is_extra(path: str) -> bool:
+    """True if any ancestor directory marks ``path`` as a Plex 'extras' file."""
+    return any(part.lower() in EXTRAS_DIRS for part in Path(path).parent.parts)
+
+
+async def library_rows(
+    paths: list[str], *, key: Callable[[LibraryRow], tuple]
+) -> list[LibraryRow]:
+    """The library-grid rows under any of ``paths``: every non-extra file fully
+    populated and sorted by ``key``.
 
     Pulls the video_file rows plus their mediainfo / ardetector / plex_item /
     movie overlays and audio + internal-subtitle tracks, keyed by video_path,
-    and resolves each file's Series by folder prefix. One LibraryRow per
-    video_file. Order is by path within each prefix; the grid's final sort is
-    the view's job (``views.library_sort_key``).
+    and resolves each file's Series by folder prefix. Bonus-feature files
+    (``is_extra``) are excluded. ``key`` is the display ordering — injected so
+    the data layer stays unaware of view policy (the grid passes
+    ``views.library_sort_key``).
     """
     series_by_folder = {s.video_folder: s for s in await Series.objects.all()}
     rows: list[LibraryRow] = []
@@ -368,7 +404,9 @@ async def library_rows(paths: list[str]) -> list[LibraryRow]:
                 subtitles=sub_by.get(v.path, []),
             )
             for v in videos
+            if not is_extra(v.path)
         )
+    rows.sort(key=key)
     return rows
 
 

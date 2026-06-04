@@ -124,47 +124,6 @@ def library_by_slug(slug: str) -> Library | None:
     return None
 
 
-# Plex's standard "extras" subdirectory names. A file under any of these
-# (at any depth) is hidden from the library view — it's a bonus feature
-# of the parent movie, not its own title. Probing + detail pages still
-# work via /item?path=...
-EXTRAS_DIRS = frozenset(
-    {
-        "behindthescenes",
-        "behind the scenes",
-        "deleted",
-        "deleted scenes",
-        "extra",
-        "extras",
-        "featurette",
-        "featurettes",
-        "interview",
-        "interviews",
-        "other",
-        "sample",
-        "samples",
-        "scenes",
-        "short",
-        "shorts",
-        "trailer",
-        "trailers",
-    },
-)
-
-
-def is_extra(path: str) -> bool:
-    """True if any ancestor directory matches a Plex 'extras' subdir name."""
-    return any(part.lower() in EXTRAS_DIRS for part in Path(path).parent.parts)
-
-
-async def library_listing(paths: list[str]) -> list[queries.LibraryRow]:
-    """The library's grid rows with bonus-feature files hidden and display-
-    sorted. Shared by the grid page and the detail page's prev/next nav so both
-    order files identically."""
-    rows = await queries.library_rows(paths)
-    return sorted((r for r in rows if not is_extra(r.path)), key=views.library_sort_key)
-
-
 async def bazarr_url_for(local_path: str) -> str | None:
     """Bazarr deep-link for the detail route. Derived from the Radarr movie id
     / Sonarr series id we already hold, gated by config flags — no Bazarr API."""
@@ -355,7 +314,7 @@ async def library_page(request: Request, slug: str) -> HTMLResponse:
     if lib is None:
         raise HTTPException(status_code=404, detail=f"no library {slug!r}")
 
-    rows_data = await library_listing(lib.paths)
+    rows_data = await queries.library_rows(lib.paths, key=views.library_sort_key)
 
     config = get_config()
     machine_id = await plex.get_machine_identifier()
@@ -434,7 +393,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     if lib is not None:
         # Use the same sort as the library page so Prev/Next feels
         # consistent. Hops over bonus features (extras).
-        ordered = await library_listing(lib.paths)
+        ordered = await queries.library_rows(lib.paths, key=views.library_sort_key)
         paths = [r.path for r in ordered]
         try:
             i = paths.index(path)
@@ -468,12 +427,12 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     # Interviews/Featurettes/... subfolder. Skip when viewing an extra
     # directly — no nested grouping.
     extras: list[dict] = []
-    if not is_extra(path):
+    if not queries.is_extra(path):
         parent_prefix = str(Path(path).parent) + "/"
         extra_paths = sorted(
             p
             for p in await queries.list_paths()
-            if p.startswith(parent_prefix) and is_extra(p)
+            if p.startswith(parent_prefix) and queries.is_extra(p)
         )
         for ep in extra_paths:
             emf = await queries.get(ep)
