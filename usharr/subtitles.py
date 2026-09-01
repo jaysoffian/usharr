@@ -44,7 +44,7 @@ def find_subtitle_files(video_path: Path) -> list[Path]:
             suffix = p.suffix.lower()
             if suffix not in SUBTITLE_EXTENSIONS:
                 continue
-            if not p.name.startswith(stem):
+            if not p.name.startswith(stem + "."):
                 continue
             if p.name == video_path.name:
                 continue
