@@ -170,7 +170,7 @@
 
 <script>
 (function() {
-  const back = {{ ('/library/' + current_slug)|tojson }};
+  const back = {{ ('/library/' + current_slug if current_slug else '/')|tojson }};
   const prev = {{ prev_path|tojson if prev_path else 'null' }};
   const next = {{ next_path|tojson if next_path else 'null' }};
   const prevSeason = {{ prev_season_path|tojson if prev_season_path else 'null' }};
