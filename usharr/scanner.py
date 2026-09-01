@@ -167,14 +167,17 @@ class Scanner:
         videos = await asyncio.to_thread(find_video_files, get_config().all_paths)
         await queries.delete_orphans(v.path for v in videos)
 
+        # Preload the per-file read side in one query each, so an unchanged
+        # file costs no round trip at all.
+        recorded = await queries.video_file_stats()
+        mediainfo_paths = await queries.mediainfo_paths()
+        ardetector_paths = await queries.ardetector_paths()
+        sidecars_by_video = await queries.subtitle_files_by_video()
+
         for video in videos:
             path = video.path
-            if vf := await queries.get(path):
-                changed = (
-                    vf.size_bytes != video.size_bytes or vf.mtime_ns != video.mtime_ns
-                )
-            else:
-                changed = True
+            key = str(path)
+            changed = recorded.get(key) != (video.size_bytes, video.mtime_ns)
 
             if changed:
                 await queries.upsert_video_file(
@@ -188,16 +191,18 @@ class Scanner:
             if changed or req.force_detect:
                 await queries.delete_ardetector(path)
 
-            if await queries.get_mediainfo(path) is None:
+            if changed or req.force_refresh or key not in mediainfo_paths:
                 self.mediainfo.enqueue(path)
-            if await queries.get_ardetector(path) is None:
+            if changed or req.force_detect or key not in ardetector_paths:
                 self.ardetector.enqueue(path)
 
             # Reconcile sidecars from disk every scan so adds/deletes/edits
             # are caught; cheap when nothing changed (compare only).
             # Guard so one bad sidecar can't abort the whole scan pass.
             try:
-                await subtitles.sync_external_subs(path, video.sidecars)
+                await subtitles.sync_external_subs(
+                    path, video.sidecars, sidecars_by_video.get(key, {})
+                )
             except Exception as exc:
                 logger.warning("subtitle sync failed for %s: %s", path, exc)
 

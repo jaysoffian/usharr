@@ -145,15 +145,19 @@ def parse_subtitle_file(video_stem: str, path: Path) -> list[SubtitleTrackExtern
     return [parse_text_sub(video_stem, path, codec)]
 
 
-async def sync_external_subs(video_path: Path, sidecars: list[Sidecar]) -> None:
+async def sync_external_subs(
+    video_path: Path,
+    sidecars: list[Sidecar],
+    recorded: dict[str, tuple[int, int]],
+) -> None:
     """Reconcile a video's external subtitle rows with its on-disk sidecars.
 
-    Cheap when nothing changed: compares the scanned (size, mtime) against the
-    recorded set, only re-parsing on a diff.
+    ``recorded`` is the video's stored {subtitle_path: (size_bytes, mtime_ns)}.
+    Cheap when nothing changed: compares the scanned stats against it, only
+    re-parsing on a diff.
     """
     disk = {str(s.path): (s.size_bytes, s.mtime_ns) for s in sidecars}
-    existing = await queries.subtitle_files_for(video_path)
-    if disk == existing:
+    if disk == recorded:
         return
 
     payload: list[tuple[str, int, int, list[SubtitleTrackExternal]]] = [

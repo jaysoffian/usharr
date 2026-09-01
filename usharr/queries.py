@@ -14,6 +14,7 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from oxyde import Model
 from oxyde.db import transaction
@@ -113,6 +114,11 @@ async def list_paths() -> set[str]:
     return {v.path for v in await VideoFile.objects.all()}
 
 
+async def video_file_stats() -> dict[str, tuple[int, int]]:
+    """Every video_file row as {path: (size_bytes, mtime_ns)}."""
+    return {v.path: (v.size_bytes, v.mtime_ns) for v in await VideoFile.objects.all()}
+
+
 async def delete_orphans(present: Iterable[Path | str]) -> None:
     """Delete video_file rows whose path is not in ``present`` (FK cascade reaps
     the dependent mediainfo/ardetector/track rows)."""
@@ -128,6 +134,16 @@ async def delete_orphans(present: Iterable[Path | str]) -> None:
 
 async def get_mediainfo(path: Path | str) -> Mediainfo | None:
     return await Mediainfo.objects.get_or_none(video_path=str(path))
+
+
+async def mediainfo_paths() -> set[str]:
+    """Every video_path that has a mediainfo row."""
+    return set(
+        cast(
+            list[str],
+            await Mediainfo.objects.values_list("video_path", flat=True).all(),
+        )
+    )
 
 
 async def upsert_mediainfo(
@@ -177,6 +193,16 @@ async def set_mediainfo_duration(path: Path | str, duration: float) -> None:
 
 async def get_ardetector(path: Path | str) -> Ardetector | None:
     return await Ardetector.objects.get_or_none(video_path=str(path))
+
+
+async def ardetector_paths() -> set[str]:
+    """Every video_path that has an ardetector row."""
+    return set(
+        cast(
+            list[str],
+            await Ardetector.objects.values_list("video_path", flat=True).all(),
+        )
+    )
 
 
 async def delete_ardetector(path: Path | str) -> None:
@@ -242,10 +268,13 @@ async def load_path_media(path: str) -> PathMedia | None:
     )
 
 
-async def subtitle_files_for(video_path: Path | str) -> dict[str, tuple[int, int]]:
-    """Return {subtitle_path: (size_bytes, mtime_ns)} for a video's sidecars."""
-    rows = await SubtitleFile.objects.filter(video_path=str(video_path)).all()
-    return {r.path: (r.size_bytes, r.mtime_ns) for r in rows}
+async def subtitle_files_by_video() -> dict[str, dict[str, tuple[int, int]]]:
+    """Every sidecar row as {video_path: {subtitle_path: (size_bytes, mtime_ns)}}."""
+    out: dict[str, dict[str, tuple[int, int]]] = {}
+    for r in await SubtitleFile.objects.all():
+        if r.video_path:
+            out.setdefault(r.video_path, {})[r.path] = (r.size_bytes, r.mtime_ns)
+    return out
 
 
 async def replace_external_subtitles(
