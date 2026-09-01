@@ -279,7 +279,11 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
     if pm is None:
         raise HTTPException(status_code=404, detail=f"no record for {path}")
     lib = next(
-        (lib for lib in libraries() if any(path.startswith(p) for p in lib.paths)),
+        (
+            lib
+            for lib in libraries()
+            if any(path.startswith(p.rstrip("/") + "/") for p in lib.paths)
+        ),
         None,
     )
     nav = await detail_nav(lib, path)

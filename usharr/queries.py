@@ -386,6 +386,7 @@ async def library_rows(
     series_by_folder = {s.video_folder: s for s in await Series.objects.all()}
     rows: list[LibraryRow] = []
     for prefix in paths:
+        prefix = prefix.rstrip("/") + "/"
         videos = (
             await VideoFile.objects.filter(path__startswith=prefix)
             .order_by("path")
