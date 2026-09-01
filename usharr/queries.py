@@ -47,6 +47,11 @@ async def chunked_delete(model: type[Model], field: str, values: list) -> int:
     return total
 
 
+async def column(model: type[Model], field: str) -> list:
+    """Fetch one column as plain scalars, via ``values_list(field, flat=True)``."""
+    return cast(list, await model.objects.values_list(field, flat=True).all())
+
+
 # --- path mapping ---------------------------------------------------------
 
 
@@ -115,7 +120,7 @@ async def upsert_video_file(*, path: Path, size_bytes: int, mtime_ns: int) -> No
 
 
 async def list_paths() -> set[str]:
-    return {v.path for v in await VideoFile.objects.all()}
+    return set(await column(VideoFile, "path"))
 
 
 async def paths_under(prefix: str) -> list[str]:
@@ -150,12 +155,7 @@ async def get_mediainfo(path: Path | str) -> Mediainfo | None:
 
 async def mediainfo_paths() -> set[str]:
     """Every video_path that has a mediainfo row."""
-    return set(
-        cast(
-            list[str],
-            await Mediainfo.objects.values_list("video_path", flat=True).all(),
-        )
-    )
+    return set(await column(Mediainfo, "video_path"))
 
 
 async def upsert_mediainfo(
@@ -209,12 +209,7 @@ async def get_ardetector(path: Path | str) -> Ardetector | None:
 
 async def ardetector_paths() -> set[str]:
     """Every video_path that has an ardetector row."""
-    return set(
-        cast(
-            list[str],
-            await Ardetector.objects.values_list("video_path", flat=True).all(),
-        )
-    )
+    return set(await column(Ardetector, "video_path"))
 
 
 async def delete_ardetector(path: Path | str) -> None:
@@ -529,7 +524,7 @@ async def get_plex_item(rating_key: str) -> PlexItem | None:
 
 
 async def list_plex_rating_keys() -> set[str]:
-    return {p.rating_key for p in await PlexItem.objects.all()}
+    return set(await column(PlexItem, "rating_key"))
 
 
 async def delete_plex_rating_keys(keys: list[str]) -> int:
@@ -549,7 +544,7 @@ async def upsert_radarr_movie(
 
 
 async def list_radarr_movie_ids() -> set[int]:
-    return {m.id for m in await Movie.objects.all()}
+    return set(await column(Movie, "id"))
 
 
 async def delete_radarr_movies(ids: list[int]) -> int:
@@ -580,7 +575,7 @@ async def upsert_sonarr_series(
 
 
 async def list_sonarr_series_ids() -> set[int]:
-    return {s.id for s in await Series.objects.all()}
+    return set(await column(Series, "id"))
 
 
 async def delete_sonarr_series(ids: list[int]) -> int:
