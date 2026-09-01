@@ -160,7 +160,8 @@ class VideoInfo:
     chroma_samples: int = 0
 
     # (timestamp_sec, ar_calculated) for every sample that passed plausibility,
-    # in chronological order. Temporal-adjacency clustering uses this directly.
+    # in sampling order (refinement passes append samples out of timestamp
+    # order). Consumers that need chronological order must sort this first.
     timeline: list[tuple[int, float]] = field(default_factory=list)
 
 
@@ -589,7 +590,7 @@ def detect_segments(vi: VideoInfo) -> list[Segment]:
     segments: list[Segment] = []
     if not vi.timeline:
         return segments
-    tl = vi.timeline  # already chronologically ordered by the sampling loop
+    tl = sorted(vi.timeline)  # timeline is in sampling order, not timestamp order
 
     i = 0
     n = len(tl)
