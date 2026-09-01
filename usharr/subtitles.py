@@ -2,7 +2,9 @@
 
 import logging
 import re
+from collections.abc import Collection
 from pathlib import Path
+from typing import NamedTuple
 
 from usharr import queries
 from usharr.langs import norm_lang
@@ -28,32 +30,31 @@ SDH_TOKENS = {"sdh", "hi", "cc"}
 VOBSUB_ID_RE = re.compile(r"^id:\s*([A-Za-z]{2,3}),\s*index:\s*(\d+)", re.MULTILINE)
 
 
-def find_subtitle_files(video_path: Path) -> list[Path]:
-    """Return external subtitle sidecar files sharing the video's stem.
+class Sidecar(NamedTuple):
+    """One external subtitle file with the stat the scanner took of it."""
 
-    A VobSub ``.idx`` is included only when its companion ``.sub`` exists
-    (the ``.idx`` alone is useless); the ``.sub`` itself is never returned.
+    path: Path
+    size_bytes: int
+    mtime_ns: int
+
+
+def sidecar_names(video_name: str, filenames: Collection[str]) -> list[str]:
+    """Pick the subtitle sidecars for ``video_name`` out of one directory's names.
+
+    A VobSub ``.idx`` counts only when its companion ``.sub`` sits alongside it
+    (the ``.idx`` alone is useless); the ``.sub`` itself is never a sidecar.
     """
-    stem = video_path.stem
-    parent = video_path.parent
-    out: list[Path] = []
-    try:
-        for p in parent.iterdir():
-            if not p.is_file():
-                continue
-            suffix = p.suffix.lower()
-            if suffix not in SUBTITLE_EXTENSIONS:
-                continue
-            if not p.name.startswith(stem + "."):
-                continue
-            if p.name == video_path.name:
-                continue
-            if suffix == ".idx" and not p.with_suffix(".sub").exists():
-                continue
-            out.append(p)
-    except OSError as exc:
-        logger.debug("subtitle scan failed for %s: %s", parent, exc)
-    out.sort(key=lambda p: p.name.lower())
+    prefix = Path(video_name).stem + "."
+    present = set(filenames)
+    out = [
+        name
+        for name in filenames
+        if (suffix := Path(name).suffix.lower()) in SUBTITLE_EXTENSIONS
+        and name.startswith(prefix)
+        and name != video_name
+        and (suffix != ".idx" or Path(name).with_suffix(".sub").name in present)
+    ]
+    out.sort(key=str.lower)
     return out
 
 
@@ -144,29 +145,24 @@ def parse_subtitle_file(video_stem: str, path: Path) -> list[SubtitleTrackExtern
     return [parse_text_sub(video_stem, path, codec)]
 
 
-async def sync_external_subs(video_path: Path, files: list[Path]) -> None:
+async def sync_external_subs(video_path: Path, sidecars: list[Sidecar]) -> None:
     """Reconcile a video's external subtitle rows with its on-disk sidecars.
 
-    Cheap when nothing changed: stats the files and compares against the
-    recorded (size, mtime) set, only re-parsing on a diff.
+    Cheap when nothing changed: compares the scanned (size, mtime) against the
+    recorded set, only re-parsing on a diff.
     """
-    disk: dict[str, tuple[int, int]] = {}
-    for p in files:
-        try:
-            st = p.stat()
-        except OSError:
-            continue
-        disk[str(p)] = (st.st_size, st.st_mtime_ns)
-
+    disk = {str(s.path): (s.size_bytes, s.mtime_ns) for s in sidecars}
     existing = await queries.subtitle_files_for(video_path)
     if disk == existing:
         return
 
-    payload: list[tuple[str, int, int, list[SubtitleTrackExternal]]] = []
-    for p in files:
-        key = str(p)
-        if key not in disk:
-            continue
-        size, mtime = disk[key]
-        payload.append((key, size, mtime, parse_subtitle_file(video_path.stem, p)))
+    payload: list[tuple[str, int, int, list[SubtitleTrackExternal]]] = [
+        (
+            str(s.path),
+            s.size_bytes,
+            s.mtime_ns,
+            parse_subtitle_file(video_path.stem, s.path),
+        )
+        for s in sidecars
+    ]
     await queries.replace_external_subtitles(video_path=video_path, files=payload)

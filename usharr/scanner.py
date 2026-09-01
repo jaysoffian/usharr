@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -20,6 +21,56 @@ VIDEO_EXTENSIONS = frozenset(
 
 # How often scan_forever wakes up between scan + sync passes.
 INTERVAL_SECONDS = 3600
+
+
+class VideoEntry(NamedTuple):
+    """One video file with its stat and its external subtitle sidecars."""
+
+    path: Path
+    size_bytes: int
+    mtime_ns: int
+    sidecars: list[subtitles.Sidecar]
+
+
+def find_video_files(roots: Iterable[str]) -> list[VideoEntry]:
+    """Walk every scan root, collecting each video's stat and its sidecars.
+
+    Blocking: call it from a worker thread. Videos are ordered naturally by
+    their path relative to their root, roots in the order given.
+    """
+    found: list[VideoEntry] = []
+    for root in roots:
+        root_path = Path(root)
+        if not root_path.is_dir():
+            logger.warning("scan root %s is missing or not a directory", root)
+            continue
+        entries: list[VideoEntry] = []
+        for dirpath, _dirnames, filenames in root_path.walk():
+            for name in filenames:
+                if Path(name).suffix.lower() not in VIDEO_EXTENSIONS:
+                    continue
+                path = dirpath / name
+                try:
+                    st = path.stat()
+                except OSError as exc:
+                    logger.warning("stat failed for %s: %s", path, exc)
+                    continue
+                sidecars: list[subtitles.Sidecar] = []
+                for sub_name in subtitles.sidecar_names(name, filenames):
+                    sub_path = dirpath / sub_name
+                    try:
+                        sub_st = sub_path.stat()
+                    except OSError:
+                        continue
+                    sidecars.append(
+                        subtitles.Sidecar(sub_path, sub_st.st_size, sub_st.st_mtime_ns)
+                    )
+                entries.append(VideoEntry(path, st.st_size, st.st_mtime_ns, sidecars))
+        entries.sort(
+            key=lambda e: fmt.natural_sort_key(str(e.path.relative_to(root_path)))
+        )
+        found.extend(entries)
+    return found
 
 
 class ScanRequest(NamedTuple):
@@ -107,52 +158,29 @@ class Scanner:
             finally:
                 self.queue.task_done()
 
-    @staticmethod
-    def find_video_files() -> list[Path]:
-        found: list[Path] = []
-        for root in get_config().all_paths:
-            root_path = Path(root)
-            if not root_path.is_dir():
-                logger.warning("Scan root %s is missing or not a directory", root)
-                continue
-            paths = (
-                p
-                for p in root_path.rglob("*")
-                if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
-            )
-            found.extend(
-                sorted(
-                    paths,
-                    key=lambda p: fmt.natural_sort_key(str(p.relative_to(root_path))),
-                )
-            )
-        return found
 
     async def scan(self, /, req: ScanRequest) -> None:
         """Scan for new/updated media files and/or refresh/analyze existing files."""
         logger.info("scan started refresh=%s analyze=%s", req.refresh, req.analyze)
         start = time.monotonic()
 
-        videos = self.find_video_files()
-        await queries.delete_orphans(videos)
+        videos = await asyncio.to_thread(find_video_files, get_config().all_paths)
+        await queries.delete_orphans(v.path for v in videos)
 
-        for path in videos:
-            try:
-                st = path.stat()
-            except OSError as exc:
-                logger.warning("stat failed for %s: %s", path, exc)
-                continue
-
+        for video in videos:
+            path = video.path
             if vf := await queries.get(path):
-                changed = vf.size_bytes != st.st_size or vf.mtime_ns != st.st_mtime_ns
+                changed = (
+                    vf.size_bytes != video.size_bytes or vf.mtime_ns != video.mtime_ns
+                )
             else:
                 changed = True
 
             if changed:
                 await queries.upsert_video_file(
                     path=path,
-                    size_bytes=st.st_size,
-                    mtime_ns=st.st_mtime_ns,
+                    size_bytes=video.size_bytes,
+                    mtime_ns=video.mtime_ns,
                 )
 
             if changed or req.force_refresh:
@@ -166,12 +194,10 @@ class Scanner:
                 self.ardetector.enqueue(path)
 
             # Reconcile sidecars from disk every scan so adds/deletes/edits
-            # are caught; cheap when nothing changed (stat + compare only).
+            # are caught; cheap when nothing changed (compare only).
             # Guard so one bad sidecar can't abort the whole scan pass.
             try:
-                await subtitles.sync_external_subs(
-                    path, subtitles.find_subtitle_files(path)
-                )
+                await subtitles.sync_external_subs(path, video.sidecars)
             except Exception as exc:
                 logger.warning("subtitle sync failed for %s: %s", path, exc)
 
