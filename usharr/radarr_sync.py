@@ -26,7 +26,6 @@ class MovieFile(Model):
 class Movie(Model):
     id: int
     tmdb_id: int | None = Field(default=None, alias="tmdbId")
-    has_file: bool = Field(default=False, alias="hasFile")
     movie_file: MovieFile | None = Field(default=None, alias="movieFile")
 
 
