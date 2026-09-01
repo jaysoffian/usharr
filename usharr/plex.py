@@ -306,12 +306,22 @@ async def account_email(client_id: str, token: str) -> str:
 
 # --- machineIdentifier ----------------------------------------------------
 
+MACHINE_ID_RETRY_SECONDS = 60
+
+machine_id_last_failure: float | None = None
+
 
 async def get_machine_identifier() -> str | None:
     """Cached fetch of the Plex server's machineIdentifier (for deep-links)."""
+    global machine_id_last_failure  # noqa: PLW0603
     row = await PlexAuth.objects.get_or_none(id=1)
     if row and row.machine_id:
         return row.machine_id
+    if (
+        machine_id_last_failure is not None
+        and time.monotonic() - machine_id_last_failure < MACHINE_ID_RETRY_SECONDS
+    ):
+        return None
     try:
         token, server_url, _ = await load_auth()
     except PlexNotLinkedError:
@@ -323,16 +333,21 @@ async def get_machine_identifier() -> str | None:
             r = await client.get(endpoint, headers=headers(client_id, token))
     except httpx.HTTPError as exc:
         logger.warning("GET /identity failed: %s", exc)
+        machine_id_last_failure = time.monotonic()
         return None
     if r.status_code != 200:
         logger.warning("GET /identity → %s", r.status_code)
+        machine_id_last_failure = time.monotonic()
         return None
     try:
         resp = parse(PlexIdentityResponse, r.content, "GET /identity")
     except PlexError:
+        machine_id_last_failure = time.monotonic()
         return None
     if not resp.container.machine_identifier:
+        machine_id_last_failure = time.monotonic()
         return None
+    machine_id_last_failure = None
     await PlexAuth.objects.filter(id=1).update(
         machine_id=resp.container.machine_identifier
     )
