@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from oxyde_admin import FastAPIAdmin
 
-from usharr import database, plex, queries, views
+from usharr import database, http, plex, queries, views
 from usharr import format as fmt
 from usharr.api import api
 from usharr.config import get_config
@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("usharr started; library=%s", get_config().library)
     yield
     await scanner.stop()
+    await http.close()
     await database.close()
     logger.info("usharr shutdown complete")
 

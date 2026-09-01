@@ -24,6 +24,7 @@ from pydantic import (
     model_validator,
 )
 
+from usharr import http
 from usharr.models import PlexAuth
 
 logger = logging.getLogger(__name__)
@@ -201,12 +202,12 @@ def auth_url(client_id: str, code: str) -> str:
 
 
 async def create_pin(client_id: str) -> PlexPin:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.post(
-            f"{PLEX_TV}/api/v2/pins",
-            headers=headers(client_id),
-            data={"strong": "true"},
-        )
+    r = await http.client().post(
+        f"{PLEX_TV}/api/v2/pins",
+        headers=headers(client_id),
+        data={"strong": "true"},
+        timeout=10.0,
+    )
     if r.status_code != 201:
         msg = f"POST /api/v2/pins → {r.status_code}: {r.text[:200]}"
         raise PlexError(msg)
@@ -215,11 +216,11 @@ async def create_pin(client_id: str) -> PlexPin:
 
 async def check_pin(client_id: str, pin_id: int) -> str | None:
     """Return authToken if the PIN has been authorized, else None."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(
-            f"{PLEX_TV}/api/v2/pins/{pin_id}",
-            headers=headers(client_id),
-        )
+    r = await http.client().get(
+        f"{PLEX_TV}/api/v2/pins/{pin_id}",
+        headers=headers(client_id),
+        timeout=10.0,
+    )
     if r.status_code == 404:
         msg = f"PIN {pin_id} expired or unknown"
         raise PlexError(msg)
@@ -251,12 +252,12 @@ async def poll_pin(
 
 async def discover_server(client_id: str, token: str) -> tuple[str, str]:
     """Pick a reachable owned server. Returns (url, name)."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(
-            f"{PLEX_TV}/api/v2/resources",
-            headers=headers(client_id, token),
-            params={"includeHttps": "1", "includeRelay": "0"},
-        )
+    r = await http.client().get(
+        f"{PLEX_TV}/api/v2/resources",
+        headers=headers(client_id, token),
+        params={"includeHttps": "1", "includeRelay": "0"},
+        timeout=10.0,
+    )
     if r.status_code != 200:
         msg = f"GET /api/v2/resources → {r.status_code}"
         raise PlexError(msg)
@@ -286,19 +287,20 @@ async def discover_server(client_id: str, token: str) -> tuple[str, str]:
 
 async def reachable(url: str, client_id: str, token: str) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=3.0, verify=True) as client:
-            r = await client.get(f"{url}/identity", headers=headers(client_id, token))
+        r = await http.client().get(
+            f"{url}/identity", headers=headers(client_id, token), timeout=3.0
+        )
         return r.status_code == 200
     except httpx.HTTPError:
         return False
 
 
 async def account_email(client_id: str, token: str) -> str:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(
-            f"{PLEX_TV}/api/v2/user",
-            headers=headers(client_id, token),
-        )
+    r = await http.client().get(
+        f"{PLEX_TV}/api/v2/user",
+        headers=headers(client_id, token),
+        timeout=10.0,
+    )
     if r.status_code != 200:
         return ""
     return parse(PlexUser, r.content, "GET /api/v2/user").email
@@ -329,8 +331,9 @@ async def get_machine_identifier() -> str | None:
     client_id = await get_or_create_client_id()
     endpoint = f"{server_url.rstrip('/')}/identity"
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(endpoint, headers=headers(client_id, token))
+        r = await http.client().get(
+            endpoint, headers=headers(client_id, token), timeout=5.0
+        )
     except httpx.HTTPError as exc:
         logger.warning("GET /identity failed: %s", exc)
         machine_id_last_failure = time.monotonic()
@@ -362,12 +365,13 @@ async def resolve_rating_key(rating_key: str) -> list[str]:
     token, server_url, _ = await load_auth()
     client_id = await get_or_create_client_id()
     endpoint = f"{server_url.rstrip('/')}/library/metadata/{rating_key}"
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            r = await client.get(endpoint, headers=headers(client_id, token))
-        except httpx.HTTPError as exc:
-            msg = f"request failed: {exc}"
-            raise PlexError(msg) from exc
+    try:
+        r = await http.client().get(
+            endpoint, headers=headers(client_id, token), timeout=10.0
+        )
+    except httpx.HTTPError as exc:
+        msg = f"request failed: {exc}"
+        raise PlexError(msg) from exc
     if r.status_code == 401:
         msg = "Plex rejected the stored token. Re-run `usharr auth`."
         raise PlexNotLinkedError(msg)

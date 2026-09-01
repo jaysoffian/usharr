@@ -1,7 +1,8 @@
 """Shared *arr (Radarr/Sonarr) HTTP fetch."""
 
-import httpx
 from pydantic import TypeAdapter, ValidationError
+
+from usharr import http
 
 
 async def get_arr[T](
@@ -11,8 +12,12 @@ async def get_arr[T](
     resource: str,
 ) -> list[T]:
     url = f"{base.rstrip('/')}/api/v3/{resource}"
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        resp = await client.get(url, headers={"X-Api-Key": api_key})
+    resp = await http.client().get(
+        url,
+        headers={"X-Api-Key": api_key},
+        timeout=30.0,
+        follow_redirects=True,
+    )
     if resp.status_code != 200:
         msg = f"GET {url} → {resp.status_code}"
         raise RuntimeError(msg)

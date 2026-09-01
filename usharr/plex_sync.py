@@ -2,7 +2,6 @@
 
 import logging
 
-import httpx
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -10,7 +9,7 @@ from pydantic import (
     ValidationError,
 )
 
-from usharr import plex, queries
+from usharr import http, plex, queries
 from usharr.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -83,8 +82,9 @@ class LibResponse(Model):
 async def get_json[T: Model](model: type[T], url: str) -> T:
     token, _, _ = await plex.load_auth()
     client_id = await plex.get_or_create_client_id()
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.get(url, headers=plex.headers(client_id, token))
+    r = await http.client().get(
+        url, headers=plex.headers(client_id, token), timeout=30.0
+    )
     if r.status_code != 200:
         msg = f"GET {url} → {r.status_code}"
         raise plex.PlexError(msg)

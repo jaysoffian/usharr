@@ -10,7 +10,7 @@ import argparse
 import asyncio
 import sys
 
-from usharr import database, plex
+from usharr import database, http, plex
 from usharr.config import get_config
 
 
@@ -26,6 +26,7 @@ async def cmd_auth(args: argparse.Namespace) -> int:
             return 0
         return await auth_link()
     finally:
+        await http.close()
         await database.close()
 
 
