@@ -192,10 +192,10 @@ async def webhook(form: Annotated[plex.PlexWebhookForm, Form()]) -> Response:
     return Response(status_code=204)
 
 
-def lookup_path(file_path: str) -> Path:
+async def lookup_path(file_path: str) -> Path:
     path = Path("/" + file_path)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"not a file: {path}")
+    if await queries.get(path) is None:
+        raise HTTPException(status_code=404, detail=f"no record for {path}")
     return path
 
 
@@ -215,7 +215,7 @@ async def task_refresh() -> Response:
 
 @api.post("/task/refresh/{file_path:path}")
 async def task_refresh_path(file_path: str) -> Response:
-    await scanner.enqueue(ScanRequest(lookup_path(file_path), refresh=True))
+    await scanner.enqueue(ScanRequest(await lookup_path(file_path), refresh=True))
     return Response(status_code=202)
 
 
@@ -228,5 +228,5 @@ async def task_analyze() -> Response:
 
 @api.post("/task/analyze/{file_path:path}")
 async def task_analyze_path(file_path: str) -> Response:
-    await scanner.enqueue(ScanRequest(lookup_path(file_path), analyze=True))
+    await scanner.enqueue(ScanRequest(await lookup_path(file_path), analyze=True))
     return Response(status_code=202)
