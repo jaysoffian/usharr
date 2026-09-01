@@ -95,6 +95,9 @@ class Scanner:
         self.ardetector = ArdetectorProber()
         self.queue: asyncio.Queue[ScanRequest] = asyncio.Queue()
         self.tasks: tuple[asyncio.Task, ...] = ()
+        # Bumped once per processed queue request; readers cache derived
+        # library state against it.
+        self.generation = 0
 
     async def enqueue(
         self,
@@ -156,6 +159,9 @@ class Scanner:
             except Exception as exc:
                 logger.exception("Exception while processing queue: %s", str(exc))
             finally:
+                # A failed pass still bumps: a partial scan may have
+                # changed rows.
+                self.generation += 1
                 self.queue.task_done()
 
 

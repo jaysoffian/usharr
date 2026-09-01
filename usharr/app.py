@@ -206,6 +206,22 @@ class DetailNav:
     is_episode: bool
 
 
+# Ordered rows per library slug, as (scanner generation, rows). The ordering
+# depends only on the library's files and their plex items, which nothing but a
+# scan / sync pass changes, so the scanner's generation is the whole invalidation.
+ordered_rows_cache: dict[str, tuple[int, list[queries.LibraryRow]]] = {}
+
+
+async def ordered_library_rows(lib: Library) -> list[queries.LibraryRow]:
+    """The library's rows in display order, reloaded once per scan pass."""
+    cached = ordered_rows_cache.get(lib.slug)
+    if cached is not None and cached[0] == scanner.generation:
+        return cached[1]
+    rows = await queries.library_rows(lib.paths, key=views.library_sort_key)
+    ordered_rows_cache[lib.slug] = (scanner.generation, rows)
+    return rows
+
+
 async def detail_nav(lib: Library | None, path: str) -> DetailNav:
     """Prev/Next navigation for the detail page: file-order siblings plus, for
     episodes, the prev/next season and show jump targets."""
@@ -213,7 +229,7 @@ async def detail_nav(lib: Library | None, path: str) -> DetailNav:
         return DetailNav(None, None, None, None, None, None, False)
     # Use the same sort as the library page so Prev/Next feels
     # consistent. Hops over bonus features (extras).
-    ordered = await queries.library_rows(lib.paths, key=views.library_sort_key)
+    ordered = await ordered_library_rows(lib)
     paths = [r.path for r in ordered]
     try:
         i = paths.index(path)
