@@ -483,7 +483,11 @@ async def upsert_plex_item(
 
 
 async def get_plex_item_by_local_path(local_path: str) -> PlexItem | None:
-    return await PlexItem.objects.filter(video_path=local_path).first()
+    return (
+        await PlexItem.objects.filter(video_path=local_path)
+        .order_by("rating_key")
+        .first()
+    )
 
 
 async def get_plex_item(rating_key: str) -> PlexItem | None:
@@ -533,7 +537,7 @@ async def all_radarr_movies_by_local_path() -> dict[str, int]:
 
 
 async def movie_for_local_path(local_path: str) -> Movie | None:
-    return await Movie.objects.filter(video_path=local_path).first()
+    return await Movie.objects.filter(video_path=local_path).order_by("id").first()
 
 
 # --- sonarr (Series) ------------------------------------------------------
