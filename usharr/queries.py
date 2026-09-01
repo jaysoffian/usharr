@@ -118,6 +118,14 @@ async def list_paths() -> set[str]:
     return {v.path for v in await VideoFile.objects.all()}
 
 
+async def paths_under(prefix: str) -> list[str]:
+    """video_file paths starting with ``prefix``, ordered by path."""
+    rows = (
+        await VideoFile.objects.filter(path__startswith=prefix).order_by("path").all()
+    )
+    return [v.path for v in rows]
+
+
 async def video_file_stats() -> dict[str, tuple[int, int]]:
     """Every video_file row as {path: (size_bytes, mtime_ns)}."""
     return {v.path: (v.size_bytes, v.mtime_ns) for v in await VideoFile.objects.all()}

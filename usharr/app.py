@@ -258,11 +258,9 @@ async def gather_extras(path: str) -> list[dict]:
     extras: list[dict] = []
     if not queries.is_extra(path):
         parent_prefix = str(Path(path).parent) + "/"
-        extra_paths = sorted(
-            p
-            for p in await queries.list_paths()
-            if p.startswith(parent_prefix) and queries.is_extra(p)
-        )
+        extra_paths = [
+            p for p in await queries.paths_under(parent_prefix) if queries.is_extra(p)
+        ]
         for ep in extra_paths:
             pm = await queries.load_path_media(ep)
             if pm is None:
