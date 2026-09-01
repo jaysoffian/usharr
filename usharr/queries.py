@@ -17,7 +17,6 @@ from pathlib import Path
 
 from oxyde import Model
 from oxyde.db import transaction
-from oxyde.queries.raw import execute_raw
 
 from usharr.models import (
     Ardetector,
@@ -565,13 +564,6 @@ async def delete_sonarr_series(ids: list[int]) -> int:
 
 
 async def series_for_local_path(local_path: str) -> Series | None:
-    """The Series whose video_folder is the longest prefix of ``local_path``."""
-    rows = await execute_raw(
-        "SELECT id FROM series"
-        " WHERE ? LIKE video_folder || '/%'"
-        " ORDER BY LENGTH(video_folder) DESC LIMIT 1",
-        [local_path],
-    )
-    if not rows:
-        return None
-    return await Series.objects.get_or_none(id=rows[0]["id"])
+    """The Series whose video_folder is the deepest ancestor of ``local_path``."""
+    by_folder = {s.video_folder: s for s in await Series.objects.all()}
+    return series_for(local_path, by_folder)
