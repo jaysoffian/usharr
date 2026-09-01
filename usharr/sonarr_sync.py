@@ -36,15 +36,20 @@ async def sync() -> None:
             return
 
         series = await get_arr(SERIES_ADAPTER, cfg.url, cfg.api_key, "series")
+        folders = queries.ancestor_folders(await queries.list_paths())
 
         seen: set[int] = set()
         for item in series:
             seen.add(item.id)
+            local_folder = queries.resolve_local_folder(
+                item.path or None, cfg.path_map, folders
+            )
+            if local_folder is None:
+                continue
             await queries.upsert_sonarr_series(
                 series_id=item.id,
                 title_slug=item.title_slug or None,
-                remote_path=item.path or None,
-                path_map=cfg.path_map,
+                local_folder=local_folder,
             )
 
         stale = sorted(await queries.list_sonarr_series_ids() - seen)

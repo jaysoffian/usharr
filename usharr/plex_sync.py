@@ -52,11 +52,14 @@ class LibMetadata(Model):
     index: int | None = None
     media: list[LibMedia] = Field(default_factory=list, alias="Media")
 
-    async def upsert(self, path_map: dict[str, str]) -> None:
+    async def upsert(self, path_map: dict[str, str], known: set[str]) -> None:
         remote_path = next(
             (p.file for m in self.media for p in m.parts if p.file),
             None,
         )
+        local_path = queries.resolve_local_file(remote_path, path_map, known)
+        if local_path is None:
+            return
         await queries.upsert_plex_item(
             rating_key=self.rating_key,
             item_type=self.type or "movie",
@@ -65,8 +68,7 @@ class LibMetadata(Model):
             show_title=self.grandparent_title,
             season_number=self.parent_index,
             episode_number=self.index,
-            remote_path=remote_path,
-            path_map=path_map,
+            local_path=local_path,
         )
 
 
@@ -112,6 +114,7 @@ async def sync() -> None:
         upserted = 0
 
         path_map = get_config().plex.path_map
+        known = await queries.list_paths()
 
         for section in sections_resp.container.directories:
             if section.type == "movie":
@@ -129,7 +132,7 @@ async def sync() -> None:
                 if not item.rating_key:
                     continue
                 seen.add(item.rating_key)
-                await item.upsert(path_map)
+                await item.upsert(path_map, known)
                 upserted += 1
 
         existing = await queries.list_plex_rating_keys()

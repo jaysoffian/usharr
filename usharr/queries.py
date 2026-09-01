@@ -63,32 +63,36 @@ def map_remote_path(remote: str, path_map: dict[str, str]) -> str:
     return remote
 
 
-async def file_exists(p: str) -> bool:
-    return await VideoFile.objects.filter(path=p).exists()
+def ancestor_folders(paths: Iterable[str]) -> set[str]:
+    """Every directory holding at least one of ``paths``, at any depth."""
+    folders: set[str] = set()
+    for path in paths:
+        for parent in Path(path).parents:
+            folder = str(parent)
+            if folder in folders:
+                break
+            folders.add(folder)
+    return folders
 
 
-async def folder_has_files(p: str) -> bool:
-    return await VideoFile.objects.filter(path__startswith=p.rstrip("/") + "/").exists()
-
-
-async def resolve_local_file(
-    remote: str | None, path_map: dict[str, str]
+def resolve_local_file(
+    remote: str | None, path_map: dict[str, str], known: set[str]
 ) -> str | None:
-    """Map a remote file path to local; None if it doesn't match a video_file row."""
+    """Map a remote file path to local; None if it isn't a known video_file path."""
     if not remote:
         return None
     mapped = map_remote_path(remote, path_map)
-    return mapped if await file_exists(mapped) else None
+    return mapped if mapped in known else None
 
 
-async def resolve_local_folder(
-    remote: str | None, path_map: dict[str, str]
+def resolve_local_folder(
+    remote: str | None, path_map: dict[str, str], folders: set[str]
 ) -> str | None:
-    """Map a remote folder path to local; None if no video_file row sits under it."""
+    """Map a remote folder path to local; None if no video_file sits under it."""
     if not remote:
         return None
-    mapped = map_remote_path(remote, path_map)
-    return mapped if await folder_has_files(mapped) else None
+    mapped = map_remote_path(remote, path_map).rstrip("/")
+    return mapped if mapped in folders else None
 
 
 # --- video_file -----------------------------------------------------------
@@ -483,19 +487,13 @@ async def upsert_plex_item(
     *,
     rating_key: str,
     item_type: str,
-    path_map: dict[str, str],
+    local_path: str,
     title: str | None = None,
     year: int | None = None,
     show_title: str | None = None,
     season_number: int | None = None,
     episode_number: int | None = None,
-    remote_path: str | None = None,
-) -> str | None:
-    """Upsert a plex_item iff it resolves to a local file. Returns the local path
-    (or None — unresolved items aren't stored)."""
-    local_path = await resolve_local_file(remote_path, path_map)
-    if local_path is None:
-        return None
+) -> None:
     await PlexItem.objects.update_or_create(
         rating_key=rating_key,
         defaults={
@@ -508,7 +506,6 @@ async def upsert_plex_item(
             "video_path": local_path,
         },
     )
-    return local_path
 
 
 async def get_plex_item_by_local_path(local_path: str) -> PlexItem | None:
@@ -535,15 +532,8 @@ async def delete_plex_rating_keys(keys: list[str]) -> int:
 
 
 async def upsert_radarr_movie(
-    *,
-    movie_id: int,
-    path_map: dict[str, str],
-    tmdb_id: int | None = None,
-    remote_path: str | None = None,
+    *, movie_id: int, local_path: str, tmdb_id: int | None = None
 ) -> None:
-    local_path = await resolve_local_file(remote_path, path_map)
-    if local_path is None:
-        return
     await Movie.objects.update_or_create(
         id=movie_id,
         defaults={"tmdb_id": tmdb_id, "video_path": local_path},
@@ -573,15 +563,8 @@ async def movie_for_local_path(local_path: str) -> Movie | None:
 
 
 async def upsert_sonarr_series(
-    *,
-    series_id: int,
-    path_map: dict[str, str],
-    title_slug: str | None = None,
-    remote_path: str | None = None,
+    *, series_id: int, local_folder: str, title_slug: str | None = None
 ) -> None:
-    local_folder = await resolve_local_folder(remote_path, path_map)
-    if local_folder is None:
-        return
     await Series.objects.update_or_create(
         id=series_id,
         defaults={"title_slug": title_slug, "video_folder": local_folder},

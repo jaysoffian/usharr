@@ -41,16 +41,19 @@ async def sync() -> None:
             return
 
         movies = await get_arr(MOVIES_ADAPTER, cfg.url, cfg.api_key, "movie")
+        known = await queries.list_paths()
 
         seen: set[int] = set()
         for item in movies:
             seen.add(item.id)
-            file_path = item.movie_file.path if item.movie_file else None
+            remote_path = item.movie_file.path if item.movie_file else None
+            local_path = queries.resolve_local_file(remote_path, cfg.path_map, known)
+            if local_path is None:
+                continue
             await queries.upsert_radarr_movie(
                 movie_id=item.id,
                 tmdb_id=item.tmdb_id,
-                remote_path=file_path or None,
-                path_map=cfg.path_map,
+                local_path=local_path,
             )
 
         stale = sorted(await queries.list_radarr_movie_ids() - seen)
