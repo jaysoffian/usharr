@@ -56,8 +56,6 @@ PLAUSI_WIDTH_PCT = 50.0
 PLAUSI_HEIGHT_PCT = 40.0  # TMM default 60; lowered to admit 3.00 and 4.00 AR crops
 PLAUSI_WIDTH_DELTA_PCT = 1.5
 PLAUSI_HEIGHT_DELTA_PCT = 2.0
-ROUND_UP = False
-ROUND_UP_THRESHOLD_PCT = 4.0
 DARK_LEVEL_PCT = 7.0
 DARK_LEVEL_MAX_PCT = 13.0
 
@@ -621,7 +619,9 @@ def detect_segments(vi: VideoInfo) -> list[Segment]:
 # --------------------------------------------------------------------------
 
 
-def round_ar_nearest(ar: float, ar_list: tuple[float, ...]) -> float:
+def round_ar(ar: float, ar_list: tuple[float, ...]) -> float:
+    if not ar_list:
+        return java_round(ar * 100) / 100
     if len(ar_list) == 1:
         return ar_list[0]
     for i in range(len(ar_list) - 1):
@@ -629,26 +629,6 @@ def round_ar_nearest(ar: float, ar_list: tuple[float, ...]) -> float:
         if ar < threshold:
             return ar_list[i]
     return ar_list[-1]
-
-
-def round_ar(ar: float, ar_list: tuple[float, ...]) -> float:
-    if not ar_list:
-        return java_round(ar * 100) / 100
-    if ROUND_UP:
-        for provided in ar_list:
-            if abs(provided - ar) <= ROUND_UP_THRESHOLD_PCT / 100:
-                return round_ar_nearest(ar, ar_list)
-        best_delta = 999.0
-        rounded = 999.0
-        for provided in ar_list:
-            delta = provided - ar
-            if delta >= 0 and delta < best_delta:
-                best_delta = delta
-                rounded = provided
-        if rounded == 999.0:
-            rounded = ar_list[-1]
-        return rounded
-    return round_ar_nearest(ar, ar_list)
 
 
 # --------------------------------------------------------------------------
