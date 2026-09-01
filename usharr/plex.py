@@ -130,7 +130,7 @@ def parse[T: BaseModel](model: type[T], payload: bytes, endpoint: str) -> T:
 # --- auth state (single-row plex_auth) ------------------------------------
 
 
-async def _auth_row() -> PlexAuth:
+async def auth_row() -> PlexAuth:
     row = await PlexAuth.objects.get_or_none(id=1)
     if row is None:
         row = await PlexAuth.objects.create(id=1)
@@ -138,7 +138,7 @@ async def _auth_row() -> PlexAuth:
 
 
 async def get_or_create_client_id() -> str:
-    row = await _auth_row()
+    row = await auth_row()
     if row.client_id:
         return row.client_id
     client_id = str(uuid.uuid4())
@@ -147,7 +147,7 @@ async def get_or_create_client_id() -> str:
 
 
 async def save_auth(token: str, server_url: str, server_name: str) -> None:
-    await _auth_row()
+    await auth_row()
     await PlexAuth.objects.filter(id=1).update(
         token=token, server_url=server_url, server_name=server_name
     )

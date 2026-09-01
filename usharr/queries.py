@@ -325,7 +325,7 @@ class LibraryRow:
         return "episode" if self.plex_season_number is not None else "movie"
 
 
-def _series_for(path: str, by_folder: dict[str, Series]) -> Series | None:
+def series_for(path: str, by_folder: dict[str, Series]) -> Series | None:
     """The Series whose video_folder is the deepest ancestor of ``path`` —
     the read-time, structure-agnostic file→series link."""
     p = Path(path).parent
@@ -436,7 +436,7 @@ async def library_rows(
                 mediainfo=mi.get(v.path),
                 ardetector=ar.get(v.path),
                 plex=plex.get(v.path),
-                series=_series_for(v.path, series_by_folder),
+                series=series_for(v.path, series_by_folder),
                 movie=movies.get(v.path),
                 audio=audio_by.get(v.path, []),
                 subtitles=sub_by.get(v.path, []),
