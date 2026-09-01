@@ -10,7 +10,7 @@ Usharr operates entirely offline, extracting the information already in your vid
 
 ## Configuration
 
-Copy [`config.yaml.example`](./config.yaml.example) to `config.yaml` and edit.
+Copy [`usharr/config.yaml.example`](./usharr/config.yaml.example) to `config.yaml` and edit.
 
 Paths are scanned recursively for files with a video extension (`.avi`, `.iso`, `.m2ts`, `.m4v`, `.mkv`, `.mov`, `.mp4`, `.ts`, `.webm`). A full scan runs at startup and once an hour thereafter. Files whose size + mtime haven't changed are skipped; `mediainfo` and `ffmpeg cropdetect` are re-run only when needed.
 

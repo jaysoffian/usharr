@@ -10,7 +10,7 @@ image: build
 
 .PHONY: serve
 serve: config.yaml
-	test -f config.yaml || cp config.yaml.example config.yaml
+	test -f config.yaml || cp usharr/config.yaml.example config.yaml
 	USHARR_DB=$(PWD)/usharr.db \
 	USHARR_CONFIG=$(PWD)/config.yaml \
 	USHARR_DB_RO=1 \

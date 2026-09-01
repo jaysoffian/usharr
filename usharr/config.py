@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -14,52 +15,7 @@ logger = logging.getLogger(__name__)
 yaml = YAML()
 yaml.preserve_quotes = True
 
-SEED_CONFIG = """\
-library:
-  Movies:
-    - /media/Movies
-  Documentaries:
-    - /media/Documentaries
-  Series:
-    - /media/TV Shows
-
-# Optional: override the URL used for Plex deep-links. Without this,
-# usharr uses the URL auto-discovered during `usharr auth`, which is
-# often an ugly plex.direct subdomain. Set this to the reverse-proxy
-# URL you normally use to reach Plex — your cookies will match and
-# you won't be re-prompted to log in. path_map (optional) works the
-# same as on the *arr integrations: a local→remote prefix map applied
-# to Plex-reported paths before suffix matching kicks in.
-# plex:
-#   url: https://plex.home.example.com
-#   path_map:
-#     "/media/Movies": /some/where/else/Movies
-
-# Optional: Tautulli base URL for per-item deep-links.
-# tautulli:
-#   url: https://plexdash.home.example.com
-
-# Optional: Bazarr subtitle deep-links. No API key needed — links reuse the
-# Radarr movie id / Sonarr series id usharr already caches. Set the base URL
-# and turn on whichever types you manage in Bazarr.
-# bazarr:
-#   url: https://bazarr.home.example.com
-#   link_movies: true
-#   link_series: true
-
-# Optional: Radarr + Sonarr deep-links. API keys from the respective
-# Settings → General → Security page.
-# radarr:
-#   url: https://radarr.home.example.com
-#   api_key: <your-api-key>
-#   path_map:
-#     "/media/Movies": /some/where/else/Movies
-# sonarr:
-#   url: https://sonarr.home.example.com
-#   api_key: <your-api-key>
-#   path_map:
-#     "/media/TV Shows": /some/where/else/TV Shows
-"""
+CONFIG_EXAMPLE = Path(__file__).parent / "config.yaml.example"
 
 
 class StripNonesModel(BaseModel):
@@ -133,5 +89,5 @@ def get_config() -> Config:
     if not path.exists():
         logger.warning("Config %s not found, seeding defaults", path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(SEED_CONFIG)
+        shutil.copyfile(CONFIG_EXAMPLE, path)
     return Config.model_validate(yaml.load(path) or {})
