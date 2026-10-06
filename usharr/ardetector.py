@@ -17,7 +17,7 @@ from usharr.models import Ardetector
 logger = logging.getLogger(__name__)
 
 # All the aspect ratios I've ever come across in actual use.
-DEFAULT_AR_LIST: tuple[float, ...] = (
+ASPECT_RATIOS: tuple[float, ...] = (
     1.33,
     1.37,
     1.43,
@@ -37,6 +37,8 @@ DEFAULT_AR_LIST: tuple[float, ...] = (
     3.00,
     4.00,
 )
+# Ensure ASPECT_RATIOS is sorted ascending as required by round_ar
+ASPECT_RATIOS = tuple(sorted(ASPECT_RATIOS))
 
 # Sampling schedule — coarse initial pass, then bisect around orphans.
 # Single-AR films converge at INITIAL_SAMPLE_COUNT samples. Multi-AR films
@@ -619,16 +621,13 @@ def detect_segments(vi: VideoInfo) -> list[Segment]:
 # --------------------------------------------------------------------------
 
 
-def round_ar(ar: float, ar_list: tuple[float, ...]) -> float:
-    if not ar_list:
-        return java_round(ar * 100) / 100
-    if len(ar_list) == 1:
-        return ar_list[0]
-    for i in range(len(ar_list) - 1):
-        threshold = math.sqrt(ar_list[i] * ar_list[i + 1])
+def round_ar(ar: float) -> float:
+    aspect_ratios = ASPECT_RATIOS
+    for i in range(len(aspect_ratios) - 1):
+        threshold = math.sqrt(aspect_ratios[i] * aspect_ratios[i + 1])
         if ar < threshold:
-            return ar_list[i]
-    return ar_list[-1]
+            return aspect_ratios[i]
+    return aspect_ratios[-1]
 
 
 # --------------------------------------------------------------------------
@@ -822,8 +821,6 @@ async def detect(path: Path) -> DetectionResult:
         msg = "ignore pct sum > 90"
         raise RuntimeError(msg)
 
-    ar_list = tuple(sorted(DEFAULT_AR_LIST))
-
     mi = await ffprobe_media_info(path)
     if mi is None:
         msg = "ffprobe failed"
@@ -962,7 +959,7 @@ async def detect(path: Path) -> DetectionResult:
     # across segments that snap to the same AR.
     rounded: dict[float, int] = {}
     for seg in segments:
-        snapped = round_ar(seg.ar_median, ar_list)
+        snapped = round_ar(seg.ar_median)
         rounded[snapped] = rounded.get(snapped, 0) + seg.sample_count
 
     total_confirmed = sum(rounded.values())
