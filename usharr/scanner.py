@@ -164,7 +164,6 @@ class Scanner:
                 self.generation += 1
                 self.queue.task_done()
 
-
     async def scan(self, /, req: ScanRequest) -> None:
         """Scan for new/updated media files and/or refresh/analyze existing files."""
         logger.info("scan started refresh=%s analyze=%s", req.refresh, req.analyze)
