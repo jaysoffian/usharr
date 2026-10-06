@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -114,8 +115,13 @@ def java_round(x: float) -> int:
 
 @dataclass
 class DetectedAR:
-    aspect: float
+    aspect: float  # snapped to ASPECT_RATIOS
     percentage: float
+    # From the largest segment that snapped to `aspect`: its median AR and the
+    # most common crop in pixels.
+    measured: float
+    width: int
+    height: int
 
 
 @dataclass
@@ -160,10 +166,11 @@ class VideoInfo:
     color_samples: int = 0
     chroma_samples: int = 0
 
-    # (timestamp_sec, ar_calculated) for every sample that passed plausibility,
-    # in sampling order (refinement passes append samples out of timestamp
-    # order). Consumers that need chronological order must sort this first.
-    timeline: list[tuple[int, float]] = field(default_factory=list)
+    # (timestamp_sec, ar_calculated, crop_width, crop_height) for every sample
+    # that passed plausibility, in sampling order (refinement passes append
+    # samples out of timestamp order). Consumers that need chronological order
+    # must sort this first.
+    timeline: list[tuple[int, float, int, int]] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -499,7 +506,7 @@ def record_sample(
         logger.debug("%s: reject: crop height too short", pass_label)
         return False
 
-    vi.timeline.append((t_sec, ar_calculated))
+    vi.timeline.append((t_sec, ar_calculated, width, height))
     vi.sample_count += 1
     logger.debug(
         "%s: accept: t=%ds sampleCount=%d ar=%s",
@@ -583,6 +590,8 @@ class Segment:
     start_sec: int
     end_sec: int  # last sample's timestamp (inclusive)
     ar_median: float
+    width: int  # most common crop across the segment's samples
+    height: int
     sample_count: int
 
 
@@ -604,11 +613,15 @@ def detect_segments(vi: VideoInfo) -> list[Segment]:
             ars = [tl[k][1] for k in range(i, j + 1)]
             ars.sort()
             median = ars[len(ars) // 2]
+            crops = Counter((tl[k][2], tl[k][3]) for k in range(i, j + 1))
+            width, height = crops.most_common(1)[0][0]
             segments.append(
                 Segment(
                     start_sec=tl[i][0],
                     end_sec=tl[j][0],
                     ar_median=median,
+                    width=width,
+                    height=height,
                     sample_count=count,
                 ),
             )
@@ -648,7 +661,7 @@ def initial_sample_times(duration: int) -> list[int]:
     return [t for t in times if t < end]
 
 
-def find_orphans(timeline: list[tuple[int, float]]) -> list[int]:
+def find_orphans(timeline: list[tuple[int, float, int, int]]) -> list[int]:
     """Indices of samples whose AR differs from both neighbours (or the one
     neighbour they have, for endpoints). Orphans are candidates for
     bisect-around refinement — either a real brief AR segment or noise."""
@@ -957,24 +970,40 @@ async def detect(path: Path) -> DetectionResult:
             raise RuntimeError(msg)
 
     # Snap each segment's median AR to the standard list, aggregate sample counts
-    # across segments that snap to the same AR.
+    # across segments that snap to the same AR, and keep the largest contributing
+    # segment so the UI can show what was actually measured.
     rounded: dict[float, int] = {}
+    largest: dict[float, Segment] = {}
     for seg in segments:
         snapped = round_ar(seg.ar_median)
         rounded[snapped] = rounded.get(snapped, 0) + seg.sample_count
+        if snapped not in largest or seg.sample_count > largest[snapped].sample_count:
+            largest[snapped] = seg
 
     total_confirmed = sum(rounded.values())
     primary_aspect = max(rounded, key=lambda k: rounded[k])
     widest_aspect = max(rounded)
     detected = [
-        DetectedAR(aspect=ar, percentage=count / total_confirmed)
+        DetectedAR(
+            aspect=ar,
+            percentage=count / total_confirmed,
+            measured=largest[ar].ar_median,
+            width=largest[ar].width,
+            height=largest[ar].height,
+        )
         for ar, count in sorted(rounded.items(), key=lambda kv: -kv[0])
     ]
 
     logger.debug(
         "segments (raw): %s",
         [
-            (s.start_sec, s.end_sec, f"{s.ar_median:.6f}", s.sample_count)
+            (
+                s.start_sec,
+                s.end_sec,
+                f"{s.ar_median:.6f}",
+                f"{s.width}x{s.height}",
+                s.sample_count,
+            )
             for s in segments
         ],
     )

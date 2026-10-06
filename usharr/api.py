@@ -40,6 +40,10 @@ class VideoInfo(BaseModel):
 class AspectSample(BaseModel):
     aspect: float
     percentage: float
+    # Absent on rows detected before they were recorded.
+    measured: float | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 class AspectInfo(BaseModel):

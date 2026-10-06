@@ -27,11 +27,13 @@
 <h3>Aspect ratios</h3>
 {% if aspect_set %}
 <table class="ars-table">
-  <thead><tr><th>AR</th><th>% runtime</th></tr></thead>
+  <thead><tr><th>AR</th><th>Measured</th><th>Crop</th><th>% runtime</th></tr></thead>
   <tbody>
   {% for a in aspect_set %}
     <tr class="{{ 'primary' if ar and a.aspect == ar.aspect_primary else '' }}">
       <td>{{ '%.2f' % a.aspect }}</td>
+      <td>{{ ('%.3f' % a.measured) if a.measured is defined else '—' }}</td>
+      <td>{{ ('%d×%d' % (a.width, a.height)) if a.width is defined else '—' }}</td>
       <td>{{ '%.0f%%' % (a.percentage * 100) }}</td>
     </tr>
   {% endfor %}
