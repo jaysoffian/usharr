@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 # All the aspect ratios I've ever come across in actual use.
 ASPECT_RATIOS: tuple[float, ...] = (
-    1.33,  # 4:3, pre-sound Acdemy
-    1.37,  # Academy (1.375:1)
+    1.33,  # 4:3 (pre-sound Academy, SDTV)
+    1.37,  # Academy (1.375)
     1.43,  # IMAX 70mm / GT
     1.46,  # ARRI ALEXA 35 3:2 Open Gate (4608x3164)
     1.50,  # 3:2
@@ -28,11 +28,11 @@ ASPECT_RATIOS: tuple[float, ...] = (
     1.66,  # Super 16mm, European Widescreen
     1.78,  # 16:9 (HDTV)
     1.85,  # Flat Widescreen
-    1.90,  # IMAX Digital / DCI 4K
+    1.90,  # IMAX Digital / DCI 4K (4096x2160≈1.90)
     2.00,  # RKO Superscope, Univisium
     2.20,  # Todd-AO, 70mm
-    2.35,  # Original 35mm Anamorphic CinemaScope, Panavision
-    2.40,  # Anamorphic Scope
+    2.35,  # Original 35mm CinemaScope, Panavision
+    2.40,  # Modern CinemaScope (rounded up from 4096x1716≈2.39)
     2.55,  # CinemaScope 55
     2.66,  # CinemaScope
     2.76,  # Ultra Panavision 70
