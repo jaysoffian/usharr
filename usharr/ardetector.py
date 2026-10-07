@@ -72,6 +72,14 @@ SEGMENT_AR_TOLERANCE = AR_SECONDARY_DELTA / 2
 # a real AR (vs. isolated cropdetect noise on scene transitions).
 MIN_SEGMENT_SAMPLES = 2
 
+# A real AR change keeps either the full width or the full height of the
+# film's frame: wider → letterboxed, narrower → pillarboxed. A segment whose
+# crop is smaller than the primary segment's on BOTH axes (beyond cropdetect
+# jitter) is therefore an inset — windowboxed archival footage, a film's
+# "small frame" sequences, or a dark frame where only a bright patch was
+# found — and is not a ratio the film is presented in.
+INSET_TOLERANCE_PCT = 1.0
+
 # A frame is monochrome iff its peak chroma is low AND the chroma is
 # distributed uniformly across the frame.
 #
@@ -630,6 +638,27 @@ def detect_segments(vi: VideoInfo) -> list[Segment]:
     return segments
 
 
+def drop_insets(segments: list[Segment]) -> list[Segment]:
+    """Remove segments windowboxed inside the primary segment's crop."""
+    primary = max(segments, key=lambda seg: seg.sample_count)
+    max_w = primary.width * (1 - INSET_TOLERANCE_PCT / 100)
+    max_h = primary.height * (1 - INSET_TOLERANCE_PCT / 100)
+    kept: list[Segment] = []
+    for seg in segments:
+        if seg.width < max_w and seg.height < max_h:
+            logger.debug(
+                "inset: dropping %dx%d segment at %ds (primary %dx%d)",
+                seg.width,
+                seg.height,
+                seg.start_sec,
+                primary.width,
+                primary.height,
+            )
+            continue
+        kept.append(seg)
+    return kept
+
+
 # --------------------------------------------------------------------------
 # roundAR
 # --------------------------------------------------------------------------
@@ -968,6 +997,8 @@ async def detect(path: Path) -> DetectionResult:
                 else "no valid samples even after full-decode"
             )
             raise RuntimeError(msg)
+
+    segments = drop_insets(segments)
 
     # Snap each segment's median AR to the standard list, aggregate sample counts
     # across segments that snap to the same AR, and keep the largest contributing
