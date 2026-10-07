@@ -80,6 +80,18 @@ MIN_SEGMENT_SAMPLES = 2
 # found — and is not a ratio the film is presented in.
 INSET_TOLERANCE_PCT = 1.0
 
+# The primary AR is the one to lock the presentation to. For a multi-AR film
+# that's the frame every section fits inside, when some section actually
+# fills that frame (The French Dispatch is 87% 1.37, but the 1.37 and 2.40
+# sections are both inside a 1.85 letterbox that a 4% section fills — lock
+# 1.85). When no section encloses the others (a 2.00 show with full-height
+# 1.33 flashbacks) fall back to the AR with the most runtime.
+#
+# An enclosing section that is the full container is suspect: a title card
+# or a bright frame reads as full-frame, and two such samples would make
+# every 2.40 show "1.78". Require that much share before trusting it.
+FRAME_MIN_PCT = 10.0
+
 # A frame is monochrome iff its peak chroma is low AND the chroma is
 # distributed uniformly across the frame.
 #
@@ -134,7 +146,7 @@ class DetectedAR:
 
 @dataclass
 class DetectionResult:
-    primary_aspect: float  # most-sampled post-snap AR
+    primary_aspect: float  # the AR to lock to; see FRAME_MIN_PCT
     widest_aspect: float  # widest post-snap AR
     detected: list[DetectedAR]
     duration: float
@@ -659,6 +671,33 @@ def drop_insets(segments: list[Segment]) -> list[Segment]:
     return kept
 
 
+def frame_aspect(
+    detected: list[DetectedAR],
+    container_width: int,
+    container_height: int,
+) -> float | None:
+    """The AR whose crop encloses every other detected crop, or None."""
+    tol = 1 + INSET_TOLERANCE_PCT / 100
+    for d in sorted(detected, key=lambda d: -d.percentage):
+        if not all(
+            o.width <= d.width * tol and o.height <= d.height * tol for o in detected
+        ):
+            continue
+        is_container = (
+            d.width * tol >= container_width and d.height * tol >= container_height
+        )
+        if is_container and d.percentage * 100 < FRAME_MIN_PCT:
+            logger.debug(
+                "frame: ignoring full-container %dx%d at %.0f%%",
+                d.width,
+                d.height,
+                d.percentage * 100,
+            )
+            return None
+        return d.aspect
+    return None
+
+
 # --------------------------------------------------------------------------
 # roundAR
 # --------------------------------------------------------------------------
@@ -1012,7 +1051,6 @@ async def detect(path: Path) -> DetectionResult:
             largest[snapped] = seg
 
     total_confirmed = sum(rounded.values())
-    primary_aspect = max(rounded, key=lambda k: rounded[k])
     widest_aspect = max(rounded)
     detected = [
         DetectedAR(
@@ -1024,6 +1062,10 @@ async def detect(path: Path) -> DetectionResult:
         )
         for ar, count in sorted(rounded.items(), key=lambda kv: -kv[0])
     ]
+    frame = frame_aspect(detected, vi.width, vi.height)
+    primary_aspect = (
+        frame if frame is not None else max(rounded, key=lambda k: rounded[k])
+    )
 
     logger.debug(
         "segments (raw): %s",
