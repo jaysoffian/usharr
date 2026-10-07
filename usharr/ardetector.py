@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 
 # All the aspect ratios I've ever come across in actual use.
 ASPECT_RATIOS: tuple[float, ...] = (
-    1.33,  # 4:3 (pre-sound Academy, SDTV)
+    1.33,  # 4:3 (SDTV, Academy pre-sound)
     1.37,  # Academy (1.375)
     1.43,  # IMAX 70mm / GT
     1.46,  # ARRI ALEXA 35 3:2 Open Gate (4608x3164)
     1.50,  # 3:2
-    1.56,  # 14:9
+    1.54,  # Magnascope parts of Hell's Angels (Criterion 4K UHD release)
     1.66,  # Super 16mm, European Widescreen
     1.78,  # 16:9 (HDTV)
     1.85,  # Flat Widescreen
