@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import re
+from array import array
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -91,6 +92,39 @@ INSET_TOLERANCE_PCT = 1.0
 # or a bright frame reads as full-frame, and two such samples would make
 # every 2.40 show "1.78". Require that much share before trusting it.
 FRAME_MIN_PCT = 10.0
+
+# Minority-AR recheck (see the section of that name). Luma constants
+# are in 8-bit units and scale by 2^(bit_depth-8) at use.
+#
+# An outer strip whose p90-p10 is at most this is flat: a bar at some level,
+# whatever that level is.
+FLAT_SPREAD = 2
+# Added over the bar level to call a pixel bright; the margin parse_dark_level
+# adds over YLOW.
+EDGE_MARGIN = 2
+# A flat strip is a lifted bar only below this share of full scale, the same
+# ceiling as DARK_LEVEL_MAX_PCT.
+LIFTED_BAR_MAX_PCT = 13.0
+# Lines in an outer strip.
+OUTER_LINES = 4
+# A bar thinner than max(4, this share of the dimension) is a residual sliver
+# beside a picture edge, not a bar to judge.
+MIN_BAR_PCT = 0.5
+# Distance past the edge at which the plateau is read, per 1920 px of width,
+# capped at half the span between the two edges; a span under FAR_MIN_LINES
+# is inconclusive.
+FAR_LINES_PER_1920 = 24
+FAR_MIN_LINES = 8
+# A matte edge is uniform along the line, so the bright fraction jumps from
+# nothing to its plateau within a line or two even when the matte is blurred;
+# a film edge, iris or vignette ramps. Measured mattes step 0.57-1.51 of the
+# plateau, film edges and vignettes 0.07-0.27. Compare, never clamp: a step
+# can exceed 1 when the picture dims again past the edge.
+STEP_HARD = 0.4
+# Minimum plateau for a result: narrowing a side needs an unmistakable
+# picture past the new edge, rejecting a sample only something to measure.
+A_MIN_PLATEAU = 0.5
+B_MIN_PLATEAU = 0.10
 
 # A frame is monochrome iff its peak chroma is low AND the chroma is
 # distributed uniformly across the frame.
@@ -308,14 +342,26 @@ async def run_ffmpeg(
     pass_label: str,
     timeout: float = 120.0,
 ) -> str:
+    """ffmpeg's output as one string. Callers use `-f null`, which writes
+    nothing to stdout, so this is ffmpeg's log."""
+    stdout, stderr = await run_ffmpeg_split(argv, pass_label, timeout)
+    return stdout.decode("utf-8", errors="replace") + stderr
+
+
+async def run_ffmpeg_split(
+    argv: list[str],
+    pass_label: str,
+    timeout: float = 120.0,
+) -> tuple[bytes, str]:
+    """Run ffmpeg, returning stdout as bytes and stderr as text."""
     logger.debug("%s: %s", pass_label, " ".join(argv))
     proc = await asyncio.create_subprocess_exec(
         *argv,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
+        stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
         proc.kill()
         await proc.wait()
@@ -324,7 +370,7 @@ async def run_ffmpeg(
     if proc.returncode != 0:
         msg = f"ffmpeg exit {proc.returncode}"
         raise RuntimeError(msg)
-    return stdout.decode("utf-8", errors="replace")
+    return stdout, stderr.decode("utf-8", errors="replace")
 
 
 async def scan_dark_level(path: Path, position: float = 0.0) -> str:
@@ -386,6 +432,47 @@ async def scan_sample(
             "1",
             "-f",
             "null",
+            "pipe:1",
+        ],
+        pass_label=pass_label,
+    )
+
+
+async def scan_plane(
+    path: Path,
+    start: int,
+    dark_level: int,
+    pass_label: str,
+) -> tuple[bytes, str]:
+    # The same seek as scan_sample, so the same keyframe is scored, with that
+    # frame's luma plane on stdout and cropdetect's line on stderr.
+    # -fps_mode passthrough keeps the frames before `start` that
+    # -noaccurate_seek decodes with negative timestamps; the default sync
+    # drops them and the plane would be a later frame than the one cropdetect
+    # scored. extractplanes=y hands the plane over as is, gray8 or gray10le
+    # with no range conversion (format=gray rescales limited to full range).
+    return await run_ffmpeg_split(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostdin",
+            "-nostats",
+            "-an",
+            "-dn",
+            "-sn",
+            "-noaccurate_seek",
+            "-ss",
+            str(int(start)),
+            "-i",
+            str(path),
+            "-fps_mode",
+            "passthrough",
+            "-vf",
+            f"cropdetect=limit={int(dark_level)}:round=2:skip=0,extractplanes=y",
+            "-vframes",
+            "1",
+            "-f",
+            "rawvideo",
             "pipe:1",
         ],
         pass_label=pass_label,
@@ -465,6 +552,52 @@ def count_chroma(vi: VideoInfo, is_color: bool | None) -> None:
         vi.color_samples += 1
 
 
+def calculated_ar(width: int, height: int, sar: float) -> tuple[float, float]:
+    """The crop's own ratio and the ratio after the sample aspect ratio."""
+    ar_measured = (width / height) if height > 0 else 9.99
+    # 10E5 in Java is 1e6 — round to 6 decimals.
+    ar_calculated = java_round(ar_measured * sar * 1_000_000) / 1_000_000
+    return ar_measured, ar_calculated
+
+
+def bar_widths(
+    x1: int, x2: int, y1: int, y2: int, vi: VideoInfo
+) -> tuple[int, int, int, int]:
+    """Left, right, top and bottom bars of a crop, in pixels."""
+    return x1, abs(vi.width - x2 - 1), y1, abs(vi.height - y2 - 1)
+
+
+def plausible_crop(
+    x1: int,
+    x2: int,
+    y1: int,
+    y2: int,
+    width: int,
+    height: int,
+    vi: VideoInfo,
+    pass_label: str,
+) -> bool:
+    """Bars symmetric within tolerance and a crop above the size floor."""
+    black_left, black_right, black_top, black_bottom = bar_widths(x1, x2, y1, y2, vi)
+    if abs(black_left - black_right) > vi.width * PLAUSI_WIDTH_DELTA_PCT / 100:
+        logger.debug(
+            "%s: reject: |blackLeft-blackRight| exceeds width delta", pass_label
+        )
+        return False
+    if abs(black_top - black_bottom) > vi.height * PLAUSI_HEIGHT_DELTA_PCT / 100:
+        logger.debug(
+            "%s: reject: |blackTop-blackBottom| exceeds height delta", pass_label
+        )
+        return False
+    if vi.width * PLAUSI_WIDTH_PCT / 100 >= width:
+        logger.debug("%s: reject: crop width too narrow", pass_label)
+        return False
+    if vi.height * PLAUSI_HEIGHT_PCT / 100 >= height:
+        logger.debug("%s: reject: crop height too short", pass_label)
+        return False
+    return True
+
+
 def record_sample(
     x1: int,
     x2: int,
@@ -485,14 +618,8 @@ def record_sample(
     whose crop reading was rejected.
     """
     count_chroma(vi, is_color)
-    black_left = x1
-    black_right = abs(vi.width - x2 - 1)
-    black_top = y1
-    black_bottom = abs(vi.height - y2 - 1)
-
-    ar_measured = (width / height) if height > 0 else 9.99
-    # 10E5 in Java is 1e6 — round to 6 decimals.
-    ar_calculated = java_round(ar_measured * vi.ar_sample * 1_000_000) / 1_000_000
+    black_left, black_right, black_top, black_bottom = bar_widths(x1, x2, y1, y2, vi)
+    ar_measured, ar_calculated = calculated_ar(width, height, vi.ar_sample)
 
     logger.debug(
         "%s: t=%ds sample: w=%d h=%d bL=%d bR=%d bT=%d bB=%d"
@@ -509,21 +636,7 @@ def record_sample(
         ar_calculated,
     )
 
-    if abs(black_left - black_right) > vi.width * PLAUSI_WIDTH_DELTA_PCT / 100:
-        logger.debug(
-            "%s: reject: |blackLeft-blackRight| exceeds width delta", pass_label
-        )
-        return False
-    if abs(black_top - black_bottom) > vi.height * PLAUSI_HEIGHT_DELTA_PCT / 100:
-        logger.debug(
-            "%s: reject: |blackTop-blackBottom| exceeds height delta", pass_label
-        )
-        return False
-    if vi.width * PLAUSI_WIDTH_PCT / 100 >= width:
-        logger.debug("%s: reject: crop width too narrow", pass_label)
-        return False
-    if vi.height * PLAUSI_HEIGHT_PCT / 100 >= height:
-        logger.debug("%s: reject: crop height too short", pass_label)
+    if not plausible_crop(x1, x2, y1, y2, width, height, vi, pass_label):
         return False
 
     vi.timeline.append((t_sec, ar_calculated, width, height))
@@ -710,6 +823,445 @@ def round_ar(ar: float) -> float:
         if ar < threshold:
             return aspect_ratios[i]
     return aspect_ratios[-1]
+
+
+@dataclass
+class Summary:
+    segments: list[Segment]  # after drop_insets
+    rounded: dict[float, int]  # samples per snapped AR
+    detected: list[DetectedAR]
+    widest_aspect: float
+    primary_aspect: float
+
+
+def summarize_segments(segments: list[Segment], vi: VideoInfo) -> Summary:
+    """Drop insets, snap each segment's median AR to ASPECT_RATIOS and pick
+    the primary and widest."""
+    segments = drop_insets(segments)
+
+    # Aggregate sample counts across segments that snap to the same AR, and
+    # keep the largest contributing segment so the UI can show what was
+    # actually measured.
+    rounded: dict[float, int] = {}
+    largest: dict[float, Segment] = {}
+    for seg in segments:
+        snapped = round_ar(seg.ar_median)
+        rounded[snapped] = rounded.get(snapped, 0) + seg.sample_count
+        if snapped not in largest or seg.sample_count > largest[snapped].sample_count:
+            largest[snapped] = seg
+
+    total_confirmed = sum(rounded.values())
+    widest_aspect = max(rounded)
+    detected = [
+        DetectedAR(
+            aspect=ar,
+            percentage=count / total_confirmed,
+            measured=largest[ar].ar_median,
+            width=largest[ar].width,
+            height=largest[ar].height,
+        )
+        for ar, count in sorted(rounded.items(), key=lambda kv: -kv[0])
+    ]
+    frame = frame_aspect(detected, vi.width, vi.height)
+    primary_aspect = (
+        frame if frame is not None else max(rounded, key=lambda k: rounded[k])
+    )
+    return Summary(
+        segments=segments,
+        rounded=rounded,
+        detected=detected,
+        widest_aspect=widest_aspect,
+        primary_aspect=primary_aspect,
+    )
+
+
+# --------------------------------------------------------------------------
+# Minority-AR recheck
+#
+# cropdetect reduces each line to one integer mean and compares it with one
+# absolute limit per file. Two things that discards:
+#   * A bar is flat whatever its level. A teal-graded night scene lifts a
+#     pillarbox from 16 to 19-20, over the film's dark level, and the sample
+#     reads wider than the film (EO: 1.78 inside 1.43).
+#   * A matte edge is uniform along the line; a film edge, iris or vignette
+#     is not. Flat black beside a Super 8 insert's ragged edge reads as a
+#     bar and the sample reads narrower than the film (Paris, Texas: 1.54
+#     inside 1.78).
+# Both are minority readings, so once a file reads as multi-AR the samples
+# of its minority ARs are re-decoded with the luma plane and each side is
+# rechecked. Where cropdetect found no bar, the lifted-bar check looks for
+# one: outer lines that are flat and dark, with a hard step to the picture,
+# move the edge in. Where cropdetect found a bar, the matte check measures
+# the step at its edge: a ramp means the dark region is content, and the
+# sample is rejected, unless the opposite side of the same axis is a hard
+# matte. One mask cuts both sides of a pillarbox or letterbox, so a hard
+# matte opposite means the ramp is dark picture beside the same mask, not a
+# film edge; a film edge, iris or vignette ramps on both sides.
+# Majority samples are never re-read, so a correct majority cannot be
+# damaged, and single-AR files never reach this code.
+#
+# Per side, with bf(i) the fraction of line i brighter than the bar level
+# plus EDGE_MARGIN and e the edge under test:
+#     plateau(e) = bf(e + FAR) - bf(e - 1)
+#     step(e)    = (max(bf(e), bf(e + 1)) - bf(e - 1)) / plateau(e)
+# --------------------------------------------------------------------------
+
+SIDES = ("L", "R", "T", "B")
+OPPOSITE = {"L": "R", "R": "L", "T": "B", "B": "T"}
+
+
+class LumaPlane:
+    """A decoded luma plane read the way cropdetect scans it: whole rows or
+    whole columns, counted inward from one side."""
+
+    def __init__(self, raw: bytes, width: int, height: int, bit_depth: int) -> None:
+        self.width = width
+        self.height = height
+        self.unit = 1 << (bit_depth - 8)
+        self.full_scale = 1 << bit_depth
+        count = width * height
+        self.data: bytes | array[int]
+        if bit_depth > 8:
+            self.data = array("H")
+            self.data.frombytes(raw[: count * 2])
+        else:
+            self.data = raw[:count]
+
+    def dim(self, side: str) -> int:
+        return self.width if side in "LR" else self.height
+
+    def line(self, side: str, i: int) -> bytes | array[int]:
+        w, h = self.width, self.height
+        if side == "L":
+            return self.data[i::w]
+        if side == "R":
+            return self.data[w - 1 - i :: w]
+        if side == "T":
+            return self.data[i * w : (i + 1) * w]
+        return self.data[(h - 1 - i) * w : (h - i) * w]
+
+
+def nearest_rank(ordered: list[int], p: float) -> int:
+    return ordered[min(len(ordered) - 1, int(p * len(ordered)))]
+
+
+def first_bright_line(plane: LumaPlane, side: str, limit: int) -> int | None:
+    """cropdetect's scan: the first line before the midpoint whose integer
+    mean exceeds `limit`."""
+    for i in range(plane.dim(side) // 2):
+        line = plane.line(side, i)
+        if sum(line) // len(line) > limit:
+            return i
+    return None
+
+
+def bright_fraction(plane: LumaPlane, side: str, i: int, threshold: int) -> float:
+    if i < 0 or i >= plane.dim(side):
+        return 0.0
+    line = plane.line(side, i)
+    return sum(1 for v in line if v > threshold) / len(line)
+
+
+@dataclass
+class EdgeProfile:
+    bf: tuple[float, ...]  # at e-1, e, e+1, e+far
+    plateau: float
+    step: float
+
+
+def edge_profile(
+    plane: LumaPlane, side: str, edge: int, threshold: int, far: int
+) -> EdgeProfile:
+    bf = tuple(
+        bright_fraction(plane, side, i, threshold)
+        for i in (edge - 1, edge, edge + 1, edge + far)
+    )
+    plateau = bf[3] - bf[0]
+    step = (max(bf[1], bf[2]) - bf[0]) / plateau if plateau > 0 else math.nan
+    return EdgeProfile(bf=bf, plateau=plateau, step=step)
+
+
+@dataclass
+class SideResult:
+    edge: int | None  # the edge to use; None rejects the sample
+    hard_matte: bool = False  # cropdetect's bar ends in a hard edge
+
+
+def recheck_side(
+    plane: LumaPlane,
+    side: str,
+    edge: int,
+    opposite_edge: int,
+    t_sec: int,
+    pass_label: str,
+) -> SideResult:
+    """Recheck one side of a cropdetect reading against the plane. The result
+    specifies the edge to use: `edge` to keep the side as read, further in when
+    a lifted bar is found past it, or None when the bar's edge is content, not
+    a matte."""
+    dim = plane.dim(side)
+    u = plane.unit
+    min_bar = max(4, round(MIN_BAR_PCT / 100 * dim))
+    far_nominal = round(FAR_LINES_PER_1920 * plane.width / 1920)
+    strip: list[int] = []
+    for i in range(OUTER_LINES):
+        strip.extend(plane.line(side, i))
+    strip.sort()
+    p10 = nearest_rank(strip, 0.10)
+    p90 = nearest_rank(strip, 0.90)
+    threshold = p90 + EDGE_MARGIN * u
+    prefix = f"{pass_label}: t={t_sec}s {side}: edge={edge} level={p90 / u:.1f}"
+
+    if edge < min_bar:
+        # Lifted-bar check: cropdetect found no bar, or a sliver. If the outer
+        # lines are flat and dark they are a bar whatever its level; scan again
+        # with their own level as the limit and demand a hard step onto a real
+        # plateau.
+        if p90 - p10 > FLAT_SPREAD * u:
+            logger.debug(
+                "%s spread=%.1f lifted-bar: not flat, keep", prefix, (p90 - p10) / u
+            )
+            return SideResult(edge)
+        if p90 > LIFTED_BAR_MAX_PCT / 100 * plane.full_scale:
+            logger.debug("%s lifted-bar: not dark, keep", prefix)
+            return SideResult(edge)
+        cand = first_bright_line(plane, side, threshold)
+        if cand is None:
+            logger.debug("%s lifted-bar: no edge before midpoint, keep", prefix)
+            return SideResult(edge)
+        far = min(far_nominal, (dim - cand - opposite_edge) // 2)
+        if far < FAR_MIN_LINES:
+            logger.debug(
+                "%s lifted-bar: candidate=%d far=%d inconclusive, keep",
+                prefix,
+                cand,
+                far,
+            )
+            return SideResult(edge)
+        ep = edge_profile(plane, side, cand, threshold, far)
+        if ep.plateau < A_MIN_PLATEAU or ep.step < STEP_HARD:
+            decision = "keep"
+        elif cand < min_bar:
+            decision = "sliver, keep"
+        else:
+            decision = "narrow"
+        logger.debug(
+            "%s lifted-bar: candidate=%d bf=%s plateau=%.2f step=%.2f far=%d %s",
+            prefix,
+            cand,
+            [round(b, 3) for b in ep.bf],
+            ep.plateau,
+            ep.step,
+            far,
+            decision,
+        )
+        return SideResult(cand if decision == "narrow" else edge)
+
+    # Matte check: cropdetect found a bar. Its edge steps if it is a matte and
+    # ramps if the dark region is content, in which case the true edge is
+    # unknowable from this frame; never widen to the container, a matte
+    # could hide in the flat black.
+    far = min(far_nominal, (dim - edge - opposite_edge) // 2)
+    if far < FAR_MIN_LINES:
+        logger.debug("%s matte: far=%d inconclusive, keep", prefix, far)
+        return SideResult(edge)
+    ep = edge_profile(plane, side, edge, threshold, far)
+    if ep.plateau < B_MIN_PLATEAU:
+        decision = "inconclusive, keep"
+    elif ep.step >= STEP_HARD:
+        decision = "hard edge, keep"
+    else:
+        decision = "ragged edge, reject"
+    logger.debug(
+        "%s matte: bf=%s plateau=%.2f step=%.2f far=%d %s",
+        prefix,
+        [round(b, 3) for b in ep.bf],
+        ep.plateau,
+        ep.step,
+        far,
+        decision,
+    )
+    if decision == "ragged edge, reject":
+        return SideResult(None)
+    return SideResult(edge, hard_matte=decision == "hard edge, keep")
+
+
+def judge_crop(
+    plane: LumaPlane,
+    x1: int,
+    x2: int,
+    y1: int,
+    y2: int,
+    t_sec: int,
+    pass_label: str,
+) -> tuple[int, int, int, int] | None:
+    """Recheck all four sides of a raw cropdetect reading. Returns the
+    edges to use, or None when a side rejects the sample and the opposite
+    side is not a hard matte."""
+    w, h = plane.width, plane.height
+    edges = {"L": x1, "R": w - 1 - x2, "T": y1, "B": h - 1 - y2}
+    results = {
+        side: recheck_side(
+            plane, side, edges[side], edges[OPPOSITE[side]], t_sec, pass_label
+        )
+        for side in SIDES
+    }
+    result: dict[str, int] = {}
+    for side in SIDES:
+        edge = results[side].edge
+        if edge is None and results[OPPOSITE[side]].hard_matte:
+            logger.debug(
+                "%s: t=%ds %s: hard matte opposite, keep", pass_label, t_sec, side
+            )
+            edge = edges[side]
+        if edge is None:
+            return None
+        result[side] = edge
+    return (result["L"], w - 1 - result["R"], result["T"], h - 1 - result["B"])
+
+
+def rounded_crop(x1: int, x2: int, y1: int, y2: int) -> tuple[int, int]:
+    """cropdetect's round=2: x and y round up to even, w and h down."""
+    x = (x1 + 1) & ~1
+    y = (y1 + 1) & ~1
+    return (x2 - x + 1) & ~1, (y2 - y + 1) & ~1
+
+
+async def recheck_sample(
+    path: Path,
+    vi: VideoInfo,
+    entry: tuple[int, float, int, int],
+    pass_label: str,
+) -> tuple[int, float, int, int] | None:
+    """Re-decode one minority sample with its luma plane and recheck each
+    side. Returns the timeline entry to keep, narrowed when a side found a
+    lifted bar, or None to reject it. Anything that stops the frame being
+    re-read as it was first scored leaves the entry as it is."""
+    t_sec, _, width, height = entry
+    raw, stderr = await scan_plane(path, t_sec, vi.dark_level, pass_label)
+    m = P_SAMPLE.search(stderr)
+    if m is None:
+        logger.debug("%s: t=%ds no cropdetect line, keep", pass_label, t_sec)
+        return entry
+    x1, x2, y1, y2, w, h = (int(g) for g in m.groups())
+    if (w, h) != (width, height):
+        logger.debug(
+            "%s: t=%ds re-decode read %dx%d, sample was %dx%d, keep",
+            pass_label,
+            t_sec,
+            w,
+            h,
+            width,
+            height,
+        )
+        return entry
+    if x1 > x2 or y1 > y2:
+        return entry
+    needed = vi.width * vi.height * (1 if vi.bit_depth == 8 else 2)
+    if len(raw) < needed:
+        logger.debug(
+            "%s: t=%ds plane is %d bytes, need %d, keep",
+            pass_label,
+            t_sec,
+            len(raw),
+            needed,
+        )
+        return entry
+    plane = LumaPlane(raw, vi.width, vi.height, vi.bit_depth)
+    edges = judge_crop(plane, x1, x2, y1, y2, t_sec, pass_label)
+    if edges is None:
+        logger.debug("%s: t=%ds reject", pass_label, t_sec)
+        return None
+    if edges == (x1, x2, y1, y2):
+        return entry
+    nx1, nx2, ny1, ny2 = edges
+    nw, nh = rounded_crop(nx1, nx2, ny1, ny2)
+    if not plausible_crop(nx1, nx2, ny1, ny2, nw, nh, vi, pass_label):
+        logger.debug("%s: t=%ds narrowed crop implausible, reject", pass_label, t_sec)
+        return None
+    _, ar_calculated = calculated_ar(nw, nh, vi.ar_sample)
+    logger.debug(
+        "%s: t=%ds narrow: %dx%d → %dx%d ar=%s",
+        pass_label,
+        t_sec,
+        width,
+        height,
+        nw,
+        nh,
+        ar_calculated,
+    )
+    return (t_sec, ar_calculated, nw, nh)
+
+
+async def recheck_minority(
+    path: Path, vi: VideoInfo, summary: Summary
+) -> tuple[int, int]:
+    """Re-read every sample of every kept segment whose snapped AR is not the
+    majority. Returns (decodes, samples narrowed or rejected)."""
+    pass_label = "R"
+    majority = max(summary.rounded, key=lambda ar: summary.rounded[ar])
+    spans = [
+        (seg.start_sec, seg.end_sec)
+        for seg in summary.segments
+        if round_ar(seg.ar_median) != majority
+    ]
+    indices = [
+        i
+        for i, entry in enumerate(vi.timeline)
+        if any(start <= entry[0] <= end for start, end in spans)
+    ]
+    logger.info(
+        "%s: rechecking %d minority sample(s) against majority %.2f",
+        pass_label,
+        len(indices),
+        majority,
+    )
+    results: dict[int, tuple[int, float, int, int] | None] = {}
+    for i in indices:
+        entry = vi.timeline[i]
+        try:
+            result = await recheck_sample(path, vi, entry, pass_label)
+        except Exception as exc:
+            logger.debug("%s: sample error at %ds: %s", pass_label, entry[0], exc)
+            continue
+        if result != entry:
+            results[i] = result
+    if results:
+        timeline: list[tuple[int, float, int, int]] = []
+        for i, entry in enumerate(vi.timeline):
+            if i not in results:
+                timeline.append(entry)
+                continue
+            result = results[i]
+            if result is None:
+                vi.sample_count -= 1
+            else:
+                timeline.append(result)
+        vi.timeline = timeline
+    return len(indices), len(results)
+
+
+def summarize_after_recheck(vi: VideoInfo, before: Summary) -> Summary:
+    """Rebuild runs from the adjusted timeline. A recheck can remove or
+    merge ARs, never introduce one: a rebuilt segment whose snapped AR was
+    absent before (two lone same-AR samples bracketing a fully rejected
+    run) is dropped."""
+    kept: list[Segment] = []
+    for seg in detect_segments(vi):
+        snapped = round_ar(seg.ar_median)
+        if snapped in before.rounded:
+            kept.append(seg)
+        else:
+            logger.debug(
+                "R: dropping new %.2f segment at %ds (%d samples)",
+                snapped,
+                seg.start_sec,
+                seg.sample_count,
+            )
+    if not kept:
+        logger.warning("R: no segment survived the recheck; keeping first result")
+        return before
+    return summarize_segments(kept, vi)
 
 
 # --------------------------------------------------------------------------
@@ -1017,6 +1569,7 @@ async def detect(path: Path) -> DetectionResult:
         )
 
     segments = detect_segments(vi)
+    seek_unstable = not segments
     if not segments:
         # Some containers/encodes (notably certain Bluray-720p anime sources)
         # confuse ffmpeg's seek index — every -ss lands mid-NAL-unit and the
@@ -1037,35 +1590,21 @@ async def detect(path: Path) -> DetectionResult:
             )
             raise RuntimeError(msg)
 
-    segments = drop_insets(segments)
-
-    # Snap each segment's median AR to the standard list, aggregate sample counts
-    # across segments that snap to the same AR, and keep the largest contributing
-    # segment so the UI can show what was actually measured.
-    rounded: dict[float, int] = {}
-    largest: dict[float, Segment] = {}
-    for seg in segments:
-        snapped = round_ar(seg.ar_median)
-        rounded[snapped] = rounded.get(snapped, 0) + seg.sample_count
-        if snapped not in largest or seg.sample_count > largest[snapped].sample_count:
-            largest[snapped] = seg
-
-    total_confirmed = sum(rounded.values())
-    widest_aspect = max(rounded)
-    detected = [
-        DetectedAR(
-            aspect=ar,
-            percentage=count / total_confirmed,
-            measured=largest[ar].ar_median,
-            width=largest[ar].width,
-            height=largest[ar].height,
-        )
-        for ar, count in sorted(rounded.items(), key=lambda kv: -kv[0])
-    ]
-    frame = frame_aspect(detected, vi.width, vi.height)
-    primary_aspect = (
-        frame if frame is not None else max(rounded, key=lambda k: rounded[k])
-    )
+    summary = summarize_segments(segments, vi)
+    if len(summary.rounded) > 1:
+        if seek_unstable:
+            # The samples' timestamps are from the linear decode, so seeking
+            # to one does not land on the frame it scored.
+            logger.info("R: skipped, samples came from the full-decode pass")
+        else:
+            decodes, changed = await recheck_minority(path, vi, summary)
+            sample_counter += decodes
+            if changed:
+                summary = summarize_after_recheck(vi, summary)
+    segments = summary.segments
+    detected = summary.detected
+    primary_aspect = summary.primary_aspect
+    widest_aspect = summary.widest_aspect
 
     logger.debug(
         "segments (raw): %s",

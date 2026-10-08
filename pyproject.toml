@@ -19,6 +19,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pytest>=9.1.1",
     "ty>=0.0.42",
 ]
 
@@ -55,3 +56,6 @@ venv = ".venv"
 # Generated stub (oxyde makemigrations). Used for types, but its internal
 # codegen (typed query overrides) isn't ours to fix — don't report on it.
 ignore = ["usharr/models.pyi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

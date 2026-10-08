@@ -16,6 +16,11 @@ serve: config.yaml
 	USHARR_DB_RO=1 \
 	mise x -- uv run uvicorn usharr.app:app --host 127.0.0.1 --port 8555 --reload
 
+.PHONY: test
+test:
+	mise x -- uv run prek -a
+	mise x -- uv run pytest tests -v
+
 .PHONY: update
 update:
 	mise x -- prek autoupdate
