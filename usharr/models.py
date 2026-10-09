@@ -91,6 +91,9 @@ class Ardetector(Model):
     aspect_widest: float | None = None
     aspect_samples: str | None = Field(default=None, db_type="TEXT")  # JSON list
     color_pct: float | None = None  # 0.0=monochrome, 1.0=color; NULL=unknown
+    # JSON object of every sample taken (ardetector.timeline_json); NULL on
+    # rows detected before it was recorded.
+    timeline: str | None = Field(default=None, db_type="TEXT")
 
     class Meta:
         is_table = True
@@ -102,6 +105,10 @@ class Ardetector(Model):
     @property
     def aspect_samples_parsed(self) -> list[dict] | None:
         return json.loads(self.aspect_samples) if self.aspect_samples else None
+
+    @property
+    def timeline_parsed(self) -> dict | None:
+        return json.loads(self.timeline) if self.timeline else None
 
 
 class AudioTrack(Model):

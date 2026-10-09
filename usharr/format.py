@@ -375,6 +375,15 @@ def format_duration(seconds: float | None) -> str:
     return f"{m}m {s:02d}s"
 
 
+def format_timestamp(seconds: int) -> str:
+    """A position in the file: 'h:mm:ss', or 'm:ss' under an hour."""
+    h, rest = divmod(seconds, 3600)
+    m, s = divmod(rest, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
 def format_season_episode(season: int | None, episode: int | None) -> str:
     if season is None and episode is None:
         return ""

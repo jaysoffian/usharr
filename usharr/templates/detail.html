@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ display_title }} — usharr{% endblock %}
 
+{% macro crop_icon(frame, crop_w, crop_h) -%}
+  {% if frame %}{% set x, y, w, h = frame.crop_rect(crop_w, crop_h) %}<svg viewBox="0 0 1920 1080" width="25" height="14" aria-hidden="true"><rect x="0" y="0" width="1920" height="1080" fill="#000" stroke="currentColor" vector-effect="non-scaling-stroke"/><rect x="{{ x }}" y="{{ y }}" width="{{ w }}" height="{{ h }}" fill="#c8c8c8"/></svg>{% endif %}
+{%- endmacro %}
+
 {% macro item_grid(mf, mi, ar, audio, subtitle, sub_exts, aspect_set, duration_str) %}
 <div class="detail-grid">
 
@@ -26,18 +30,37 @@
 <section>
 <h3>Aspect ratios</h3>
 {% if aspect_set %}
+{% set frame = display_frame(ar) %}
 <table class="ars-table">
-  <thead><tr><th>Ratio</th><th>Measured</th><th>Runtime</th></tr></thead>
+  <thead><tr><th>Ratio</th><th>Measured</th><th>Runtime</th><th></th></tr></thead>
   <tbody>
   {% for a in aspect_set %}
     <tr class="{{ 'primary' if ar and a.aspect == ar.aspect_primary else '' }}">
       <td>{{ '%.2f' % a.aspect }}</td>
       <td><span class="subtle">{{ ('%.3f (%d×%d)' % (a.measured, a.width, a.height)) if a.measured is defined else '—' }}</span></td>
       <td>{{ '%.0f%%' % (a.percentage * 100) }}</td>
+      <td>{% if a.width is defined %}{{ crop_icon(frame, a.width, a.height) }}{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+{% set timeline = timeline_rows(ar) %}
+{% if timeline %}
+<table class="ars-table timeline">
+  <thead><tr><th>Ratio</th><th>Measured</th><th>Start</th><th>Duration</th><th></th></tr></thead>
+  <tbody>
+  {% for seg in timeline %}
+    <tr class="{{ 'inset' if seg.inset else '' }}">
+      <td>{{ seg.aspect }}</td>
+      <td><span class="subtle">{{ '%.3f (%d×%d)' % (seg.measured, seg.width, seg.height) }}</span></td>
+      <td>{{ seg.start }}</td>
+      <td>{{ seg.duration }}</td>
+      <td>{{ crop_icon(frame, seg.width, seg.height) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% else %}
 <p class="empty">No AR data.</p>
 {% endif %}

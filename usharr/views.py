@@ -11,8 +11,8 @@ display columns.
 from collections import Counter
 from dataclasses import dataclass
 
+from usharr import ardetector, models, queries
 from usharr import format as fmt
-from usharr import models, queries
 from usharr.audio_title import clean_audio_title
 from usharr.config import Config
 
@@ -356,6 +356,72 @@ def detail_error(
     if ar and ar.error:
         errors.append(f"ardetector: {ar.error}")
     return "; ".join(errors) if errors else None
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineRow:
+    start: str
+    end: str
+    duration: str
+    aspect: str
+    measured: float
+    width: int
+    height: int
+    inset: bool
+
+
+# The crop icons draw every crop inside the 16:9 signal a player outputs.
+ICON_WIDTH = 1920
+ICON_HEIGHT = 1080
+
+
+@dataclass(frozen=True, slots=True)
+class DisplayFrame:
+    sar: float
+    # Scale from file pixels to the icon: the display frame (width * SAR by
+    # height) fitted inside the 16:9 box the way a player fits it.
+    scale: float
+
+    def crop_rect(self, crop_width: int, crop_height: int) -> tuple[int, int, int, int]:
+        """x, y, width, height of a crop centred in the icon, in icon units."""
+        w = round(crop_width * self.sar * self.scale)
+        h = round(crop_height * self.scale)
+        return (ICON_WIDTH - w) // 2, (ICON_HEIGHT - h) // 2, w, h
+
+
+def display_frame(ar: models.Ardetector | None) -> DisplayFrame | None:
+    """The file's display frame from the stored timeline, for the crop icons;
+    None for a row without a timeline."""
+    data = ar.timeline_parsed if ar else None
+    if not data:
+        return None
+    sar = data["sar"]
+    scale = min(ICON_WIDTH / (data["width"] * sar), ICON_HEIGHT / data["height"])
+    return DisplayFrame(sar=sar, scale=scale)
+
+
+def timeline_rows(ar: models.Ardetector | None) -> list[TimelineRow]:
+    """The stored sample timeline rebuilt into segments for the detail page,
+    or nothing for a single-segment file or a row without a timeline."""
+    data = ar.timeline_parsed if ar else None
+    if not data:
+        return []
+    segments = ardetector.stored_segments(data)
+    if len(segments) < 2:
+        return []
+    return [
+        TimelineRow(
+            start=fmt.format_timestamp(seg.start_sec),
+            end=fmt.format_timestamp(seg.end_sec),
+            duration=fmt.format_timestamp(seg.duration_sec),
+            aspect=fmt.format_ratio(seg.aspect),
+            measured=seg.measured,
+            width=seg.width,
+            height=seg.height,
+            inset=seg.inset,
+        )
+        for seg in segments
+    ]
 
 
 def audio_lang(t: models.AudioTrack) -> str:

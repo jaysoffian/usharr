@@ -10,7 +10,7 @@ from fastapi import APIRouter, Form, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from usharr import models, plex, probers, queries
+from usharr import ardetector, models, plex, probers, queries
 from usharr.config import get_config
 from usharr.scanner import ScanRequest, scanner
 
@@ -46,10 +46,24 @@ class AspectSample(BaseModel):
     height: int | None = None
 
 
+class TimelineSegment(BaseModel):
+    start_sec: int
+    end_sec: int
+    duration_sec: int
+    aspect: float
+    measured: float
+    width: int
+    height: int
+    inset: bool
+
+
 class AspectInfo(BaseModel):
     primary: float | None = None
     widest: float | None = None
     samples: list[AspectSample] | None = None
+    # Runtime-ordered segments rebuilt from the stored sample timeline;
+    # absent on rows detected before the timeline was recorded.
+    segments: list[TimelineSegment] | None = None
 
 
 class InfoResponse(BaseModel):
@@ -90,6 +104,15 @@ async def build_info(
     internal_subs, external_subs = await queries.get_subtitle_tracks(path)
     samples_raw = ar.aspect_samples_parsed if ar else None
     samples = [AspectSample(**s) for s in samples_raw] if samples_raw else None
+    timeline = ar.timeline_parsed if ar else None
+    segments = (
+        [
+            TimelineSegment.model_validate(seg, from_attributes=True)
+            for seg in ardetector.stored_segments(timeline)
+        ]
+        if timeline
+        else None
+    )
     return response_cls(
         path=path,
         mediainfo_error=mi.error if mi else None,
@@ -101,6 +124,7 @@ async def build_info(
             primary=ar.aspect_primary if ar else None,
             widest=ar.aspect_widest if ar else None,
             samples=samples,
+            segments=segments,
         ),
         audio=await queries.get_audio_tracks(path),
         subtitles=[*internal_subs, *external_subs],

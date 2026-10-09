@@ -804,6 +804,9 @@ table.tracks td.wrap {
   word-break: break-word;
 }
 table.ars-table tr.primary td { color: var(--accent); font-weight: 600; }
+table.ars-table.timeline { margin-top: 12px; }
+table.ars-table tr.inset td { color: var(--fg-dim); }
+table.ars-table svg { vertical-align: middle; overflow: visible; }
 
 pre.err {
   background: var(--err-bg);

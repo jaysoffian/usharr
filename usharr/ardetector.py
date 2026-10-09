@@ -11,7 +11,8 @@ import math
 import re
 from array import array
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from itertools import pairwise
 from pathlib import Path
 
 from usharr.models import Ardetector
@@ -51,6 +52,10 @@ SAMPLE_COUNT_MAX = 360  # wall-clock ceiling for heavy multi-AR films
 # Stop bisecting around an orphan once neighbouring samples are within this
 # many seconds — further refinement can't resolve sub-15s blips.
 MIN_REFINEMENT_GAP_SEC = 15
+# Once a file reads as multi-AR, bisect between every adjacent pair of samples
+# whose ARs differ until the pair is this close, so each AR change is placed
+# to within this many seconds.
+BOUNDARY_GAP_SEC = 10
 SAMPLE_DURATION = 1  # used only as an end-of-file safety margin
 
 # global parameters
@@ -159,7 +164,12 @@ P_FULL_SAMPLE = re.compile(
     r"\sw:([0-9]+)\sh:([0-9]+)\sx:[0-9]+\sy:[0-9]+"
     r"\spts:-?[0-9]+\st:(-?[0-9.]+)"
 )
+# metadata=print's frame line; with -noaccurate_seek the decoded keyframe sits
+# at or before the requested time and pts_time is its offset from it.
+P_PTS_TIME = re.compile(r"pts_time:(-?[0-9.]+)")
 P_DUR = re.compile(r"Duration:\s(\d\d:\d\d:\d\d\.\d\d),")
+
+Sample = tuple[int, float, int, int]
 
 
 def java_round(x: float) -> int:
@@ -185,6 +195,8 @@ class DetectionResult:
     detected: list[DetectedAR]
     duration: float
     sar: float
+    # The per-sample timeline as stored, see timeline_json.
+    timeline: dict
     # Fraction of samples that looked like color (SATMAX ≥ threshold). 1.0
     # = all color; 0.0 = pure monochrome; mid-range = mixed (e.g. a B&W
     # episode with a colored studio bumper). None when no sample produced
@@ -223,8 +235,13 @@ class VideoInfo:
     # (timestamp_sec, ar_calculated, crop_width, crop_height) for every sample
     # that passed plausibility, in sampling order (refinement passes append
     # samples out of timestamp order). Consumers that need chronological order
-    # must sort this first.
-    timeline: list[tuple[int, float, int, int]] = field(default_factory=list)
+    # must sort this first. Seek sampling drops a sample whose frame time is
+    # already present; the full-decode pass may record one time twice.
+    timeline: list[Sample] = field(default_factory=list)
+    # What the minority recheck changed: the reading each narrowed sample had
+    # before, keyed by its timestamp, and the readings it rejected.
+    narrowed: dict[int, Sample] = field(default_factory=dict)
+    rejected: list[Sample] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -688,6 +705,15 @@ def parse_sample(
         # frame — color classification is independent of plausibility.
         count_chroma(vi, is_color)
         return
+    frame_sec = frame_time(buf, t_sec)
+    if any(entry[0] == frame_sec for entry in vi.timeline):
+        logger.debug(
+            "%s: t=%ds landed on the frame at %ds, already sampled",
+            pass_label,
+            t_sec,
+            frame_sec,
+        )
+        return
     record_sample(
         x1=int(m.group(1)),
         x2=int(m.group(2)),
@@ -695,11 +721,22 @@ def parse_sample(
         y2=int(m.group(4)),
         width=int(m.group(5)),
         height=int(m.group(6)),
-        t_sec=t_sec,
+        t_sec=frame_sec,
         vi=vi,
         pass_label=pass_label,
         is_color=is_color,
     )
+
+
+def frame_time(buf: str, t_sec: int) -> int:
+    """The time of the decoded frame: the requested time plus the pts_time
+    offset metadata=print reports, or the requested time when there is none.
+    Rounded up, so that seeking to it decodes the same keyframe again (the
+    recheck depends on that); keyframes are at least a second apart."""
+    offset = parse_float(P_PTS_TIME, buf)
+    if offset is None:
+        return t_sec
+    return math.ceil(t_sec + offset)
 
 
 # --------------------------------------------------------------------------
@@ -720,12 +757,45 @@ def parse_sample(
 
 @dataclass
 class Segment:
-    start_sec: int
+    start_sec: int  # first sample's timestamp
     end_sec: int  # last sample's timestamp (inclusive)
     ar_median: float
     width: int  # most common crop across the segment's samples
     height: int
     sample_count: int
+    # The runtime the segment stands for, see with_spans. Zero until assigned.
+    span_start_sec: int = 0
+    span_end_sec: int = 0
+
+    @property
+    def span_sec(self) -> int:
+        return self.span_end_sec - self.span_start_sec
+
+
+def analysis_window(duration: int) -> tuple[int, int]:
+    """The part of the file that is sampled, ignoring begin/end pct."""
+    start = int(duration * IGNORE_BEGINNING_PCT / 100)
+    end = int(duration * (1 - IGNORE_END_PCT / 100))
+    return start, end
+
+
+def with_spans(
+    segments: list[Segment], window_start: int, window_end: int
+) -> list[Segment]:
+    """Copies of the segments with the runtime between them split at the
+    midpoint of the gap between each pair of neighbours; the first starts at
+    the window start and the last ends at the window end. Only the segments
+    given take part, so a dropped inset's runtime goes to its neighbours."""
+    if not segments:
+        return []
+    bounds = [min(window_start, segments[0].start_sec)]
+    for previous, following in pairwise(segments):
+        bounds.append((previous.end_sec + following.start_sec) // 2)
+    bounds.append(max(window_end, segments[-1].end_sec))
+    return [
+        replace(seg, span_start_sec=start, span_end_sec=end)
+        for seg, (start, end) in zip(segments, pairwise(bounds), strict=True)
+    ]
 
 
 def detect_segments(vi: VideoInfo) -> list[Segment]:
@@ -827,8 +897,8 @@ def round_ar(ar: float) -> float:
 
 @dataclass
 class Summary:
-    segments: list[Segment]  # after drop_insets
-    rounded: dict[float, int]  # samples per snapped AR
+    segments: list[Segment]  # after drop_insets, with spans
+    rounded: dict[float, int]  # runtime seconds per snapped AR
     detected: list[DetectedAR]
     widest_aspect: float
     primary_aspect: float
@@ -837,30 +907,30 @@ class Summary:
 def summarize_segments(segments: list[Segment], vi: VideoInfo) -> Summary:
     """Drop insets, snap each segment's median AR to ASPECT_RATIOS and pick
     the primary and widest."""
-    segments = drop_insets(segments)
+    segments = with_spans(drop_insets(segments), *analysis_window(vi.duration))
 
-    # Aggregate sample counts across segments that snap to the same AR, and
-    # keep the largest contributing segment so the UI can show what was
-    # actually measured.
-    rounded: dict[float, int] = {}
+    # Aggregate runtime across segments that snap to the same AR, and keep
+    # the longest contributing segment so the UI can show what was actually
+    # measured.
+    rounded: Counter[float] = Counter()
     largest: dict[float, Segment] = {}
     for seg in segments:
         snapped = round_ar(seg.ar_median)
-        rounded[snapped] = rounded.get(snapped, 0) + seg.sample_count
-        if snapped not in largest or seg.sample_count > largest[snapped].sample_count:
+        rounded[snapped] += seg.span_sec
+        if snapped not in largest or seg.span_sec > largest[snapped].span_sec:
             largest[snapped] = seg
 
-    total_confirmed = sum(rounded.values())
+    total_runtime = sum(rounded.values())
     widest_aspect = max(rounded)
     detected = [
         DetectedAR(
             aspect=ar,
-            percentage=count / total_confirmed,
+            percentage=seconds / total_runtime,
             measured=largest[ar].ar_median,
             width=largest[ar].width,
             height=largest[ar].height,
         )
-        for ar, count in sorted(rounded.items(), key=lambda kv: -kv[0])
+        for ar, seconds in sorted(rounded.items(), key=lambda kv: -kv[0])
     ]
     frame = frame_aspect(detected, vi.width, vi.height)
     primary_aspect = (
@@ -1130,9 +1200,9 @@ def rounded_crop(x1: int, x2: int, y1: int, y2: int) -> tuple[int, int]:
 async def recheck_sample(
     path: Path,
     vi: VideoInfo,
-    entry: tuple[int, float, int, int],
+    entry: Sample,
     pass_label: str,
-) -> tuple[int, float, int, int] | None:
+) -> Sample | None:
     """Re-decode one minority sample with its luma plane and recheck each
     side. Returns the timeline entry to keep, narrowed when a side found a
     lifted bar, or None to reject it. Anything that stops the frame being
@@ -1216,7 +1286,7 @@ async def recheck_minority(
         len(indices),
         majority,
     )
-    results: dict[int, tuple[int, float, int, int] | None] = {}
+    results: dict[int, Sample | None] = {}
     for i in indices:
         entry = vi.timeline[i]
         try:
@@ -1227,7 +1297,7 @@ async def recheck_minority(
         if result != entry:
             results[i] = result
     if results:
-        timeline: list[tuple[int, float, int, int]] = []
+        timeline: list[Sample] = []
         for i, entry in enumerate(vi.timeline):
             if i not in results:
                 timeline.append(entry)
@@ -1235,8 +1305,10 @@ async def recheck_minority(
             result = results[i]
             if result is None:
                 vi.sample_count -= 1
+                vi.rejected.append(entry)
             else:
                 timeline.append(result)
+                vi.narrowed[entry[0]] = entry
         vi.timeline = timeline
     return len(indices), len(results)
 
@@ -1265,14 +1337,133 @@ def summarize_after_recheck(vi: VideoInfo, before: Summary) -> Summary:
 
 
 # --------------------------------------------------------------------------
+# Stored timeline
+#
+# Every sample is kept in the ardetector row as JSON so segments, insets,
+# snapping and the primary can be rebuilt from the database by the functions
+# above without decoding the file again. Samples the recheck narrowed carry
+# their first reading under "orig"; samples it rejected are kept with their
+# reading and "rejected": true, and every rebuild skips them.
+# --------------------------------------------------------------------------
+
+
+def timeline_json(vi: VideoInfo) -> dict:
+    samples: list[dict] = []
+    for t, ar, w, h in vi.timeline:
+        sample: dict = {"t": t, "ar": ar, "w": w, "h": h}
+        if t in vi.narrowed:
+            _, orig_ar, orig_w, orig_h = vi.narrowed[t]
+            sample["orig"] = {"ar": orig_ar, "w": orig_w, "h": orig_h}
+        samples.append(sample)
+    samples.extend(
+        {"t": t, "ar": ar, "w": w, "h": h, "rejected": True}
+        for t, ar, w, h in vi.rejected
+    )
+    samples.sort(key=lambda s: s["t"])
+    return {
+        "width": vi.width,
+        "height": vi.height,
+        "duration": vi.duration,
+        "sar": vi.ar_sample,
+        "bit_depth": vi.bit_depth,
+        "dark_level": vi.dark_level,
+        "samples": samples,
+    }
+
+
+def timeline_from_json(data: dict) -> VideoInfo:
+    """A VideoInfo whose timeline holds the stored samples that were not
+    rejected, enough for detect_segments and summarize_segments."""
+    return VideoInfo(
+        width=data["width"],
+        height=data["height"],
+        duration=data["duration"],
+        bit_depth=data["bit_depth"],
+        dark_level=data["dark_level"],
+        ar_sample=data["sar"],
+        timeline=[
+            (s["t"], s["ar"], s["w"], s["h"])
+            for s in data["samples"]
+            if not s.get("rejected")
+        ],
+    )
+
+
+@dataclass(frozen=True)
+class TimelineSegment:
+    start_sec: int
+    end_sec: int
+    aspect: float  # snapped
+    measured: float
+    width: int
+    height: int
+    inset: bool
+
+    @property
+    def duration_sec(self) -> int:
+        return self.end_sec - self.start_sec
+
+
+def merge_same_aspect(
+    runs: list[tuple[Segment, bool]],
+) -> list[tuple[Segment, bool]]:
+    """Join neighbouring runs that snap to the same AR and are both insets or
+    both not: a lone reading between two runs of one ratio is not a boundary.
+    The joined run keeps the measurement of the larger run."""
+    merged: list[tuple[Segment, bool]] = []
+    for seg, inset in runs:
+        if merged:
+            previous, previous_inset = merged[-1]
+            if previous_inset == inset and round_ar(previous.ar_median) == round_ar(
+                seg.ar_median
+            ):
+                larger = max(previous, seg, key=lambda run: run.sample_count)
+                merged[-1] = (
+                    replace(
+                        larger,
+                        start_sec=previous.start_sec,
+                        end_sec=seg.end_sec,
+                        sample_count=previous.sample_count + seg.sample_count,
+                    ),
+                    inset,
+                )
+                continue
+        merged.append((seg, inset))
+    return merged
+
+
+def stored_segments(data: dict) -> list[TimelineSegment]:
+    """The stored timeline rebuilt into runtime-ordered segments, insets
+    included and marked, each spanning the runtime it stands for."""
+    vi = timeline_from_json(data)
+    segments = detect_segments(vi)
+    if not segments:
+        return []
+    kept = {id(seg) for seg in drop_insets(segments)}
+    runs = merge_same_aspect([(seg, id(seg) not in kept) for seg in segments])
+    spans = with_spans([seg for seg, _ in runs], *analysis_window(vi.duration))
+    return [
+        TimelineSegment(
+            start_sec=span.span_start_sec,
+            end_sec=span.span_end_sec,
+            aspect=round_ar(seg.ar_median),
+            measured=seg.ar_median,
+            width=seg.width,
+            height=seg.height,
+            inset=inset,
+        )
+        for (seg, inset), span in zip(runs, spans, strict=True)
+    ]
+
+
+# --------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------
 
 
 def initial_sample_times(duration: int) -> list[int]:
     """~INITIAL_SAMPLE_COUNT uniform sample times ignoring begin/end pct."""
-    start = int(duration * IGNORE_BEGINNING_PCT / 100)
-    end = int(duration * (1 - IGNORE_END_PCT / 100))
+    start, end = analysis_window(duration)
     span = max(end - start, 0)
     if span <= 0:
         return []
@@ -1281,7 +1472,7 @@ def initial_sample_times(duration: int) -> list[int]:
     return [t for t in times if t < end]
 
 
-def find_orphans(timeline: list[tuple[int, float, int, int]]) -> list[int]:
+def find_orphans(timeline: list[Sample]) -> list[int]:
     """Indices of samples whose AR differs from both neighbours (or the one
     neighbour they have, for endpoints). Orphans are candidates for
     bisect-around refinement — either a real brief AR segment or noise."""
@@ -1298,6 +1489,29 @@ def find_orphans(timeline: list[tuple[int, float, int, int]]) -> list[int]:
         if not prev_close and not next_close:
             orphans.append(i)
     return orphans
+
+
+def boundary_midpoints(timeline: list[Sample], sampled: set[int]) -> set[int]:
+    """One new time per adjacent pair of a sorted timeline whose ARs differ
+    and which are more than BOUNDARY_GAP_SEC apart. Times already requested
+    inside the gap (samples that failed plausibility) split it into
+    stretches; the longest stretch is bisected if it is itself over the
+    floor, so a rejected midpoint is followed by the quarter points."""
+    midpoints: set[int] = set()
+    for (t_before, ar_before, _, _), (t_after, ar_after, _, _) in pairwise(timeline):
+        if (
+            abs(ar_after - ar_before) < SEGMENT_AR_TOLERANCE
+            or t_after - t_before <= BOUNDARY_GAP_SEC
+        ):
+            continue
+        inside = sorted(t for t in sampled if t_before < t < t_after)
+        start, end = max(
+            pairwise([t_before, *inside, t_after]),
+            key=lambda stretch: stretch[1] - stretch[0],
+        )
+        if end - start > BOUNDARY_GAP_SEC:
+            midpoints.add((start + end) // 2)
+    return midpoints
 
 
 async def sample_at(
@@ -1568,6 +1782,37 @@ async def detect(path: Path) -> DetectionResult:
             vi.sample_count,
         )
 
+    # Place each AR change to within BOUNDARY_GAP_SEC by bisecting between
+    # every adjacent pair of samples that disagree. Only files that already
+    # read as multi-AR pay for this; single-AR files never enter.
+    if len(detect_segments(vi)) > 1:
+        while vi.sample_count < SAMPLE_COUNT_MAX:
+            midpoints = boundary_midpoints(sorted(vi.timeline), sampled)
+            if not midpoints:
+                break
+            refine_pass += 1
+            pass_label = str(refine_pass)
+            budget = SAMPLE_COUNT_MAX - vi.sample_count
+            sorted_midpoints = sorted(midpoints)[:budget]
+            logger.info(
+                "%s: bisecting %d boundary gap(s): %d new sample(s)",
+                pass_label,
+                len(midpoints),
+                len(sorted_midpoints),
+            )
+            sample_counter += await sample_at(
+                path,
+                vi,
+                sorted_midpoints,
+                sampled,
+                pass_label,
+            )
+            logger.info(
+                "%s: pass done: total_valid=%d",
+                pass_label,
+                vi.sample_count,
+            )
+
     segments = detect_segments(vi)
     seek_unstable = not segments
     if not segments:
@@ -1649,6 +1894,7 @@ async def detect(path: Path) -> DetectionResult:
         detected=detected,
         duration=float(vi.duration),
         sar=vi.ar_sample,
+        timeline=timeline_json(vi),
         color_pct=color_pct,
     )
 
@@ -1661,5 +1907,6 @@ def to_ardetector_row(path: Path, result: DetectionResult) -> Ardetector:
             "aspect_widest": result.widest_aspect,
             "aspect_samples": json.dumps([asdict(d) for d in result.detected]),
             "color_pct": result.color_pct,
+            "timeline": json.dumps(result.timeline),
         }
     )

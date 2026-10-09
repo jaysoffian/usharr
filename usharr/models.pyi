@@ -2113,9 +2113,13 @@ class Ardetector(Model):
     aspect_widest: float | None
     aspect_samples: str | None
     color_pct: float | None
+    timeline: str | None
     video_path: str | None
     @property
     def aspect_samples_parsed(self) -> list[dict] | None:
+        ...
+    @property
+    def timeline_parsed(self) -> dict | None:
         ...
     objects: ClassVar["ArdetectorManager"]
 
@@ -2184,6 +2188,16 @@ class ArdetectorQuery(Query[Ardetector]):
         id__range: int | None = None,
         id__in: list[int] | None = None,
         id__isnull: bool | None = None,
+        timeline: str | None = None,
+        timeline__contains: str | None = None,
+        timeline__icontains: str | None = None,
+        timeline__startswith: str | None = None,
+        timeline__istartswith: str | None = None,
+        timeline__endswith: str | None = None,
+        timeline__iendswith: str | None = None,
+        timeline__iexact: str | None = None,
+        timeline__in: list[str] | None = None,
+        timeline__isnull: bool | None = None,
         video: VideoFile | None = None,
         video__in: list[VideoFile] | None = None,
         video__isnull: bool | None = None,
@@ -2260,6 +2274,16 @@ class ArdetectorQuery(Query[Ardetector]):
         id__range: int | None = None,
         id__in: list[int] | None = None,
         id__isnull: bool | None = None,
+        timeline: str | None = None,
+        timeline__contains: str | None = None,
+        timeline__icontains: str | None = None,
+        timeline__startswith: str | None = None,
+        timeline__istartswith: str | None = None,
+        timeline__endswith: str | None = None,
+        timeline__iendswith: str | None = None,
+        timeline__iexact: str | None = None,
+        timeline__in: list[str] | None = None,
+        timeline__isnull: bool | None = None,
         video: VideoFile | None = None,
         video__in: list[VideoFile] | None = None,
         video__isnull: bool | None = None,
@@ -2277,7 +2301,7 @@ class ArdetectorQuery(Query[Ardetector]):
         """Exclude objects matching field lookups."""
         ...
 
-    def order_by(self, *fields: Literal["aspect_primary", "-aspect_primary", "aspect_samples", "-aspect_samples", "aspect_widest", "-aspect_widest", "color_pct", "-color_pct", "error", "-error", "id", "-id", "video", "-video", "video_path", "-video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
+    def order_by(self, *fields: Literal["aspect_primary", "-aspect_primary", "aspect_samples", "-aspect_samples", "aspect_widest", "-aspect_widest", "color_pct", "-color_pct", "error", "-error", "id", "-id", "timeline", "-timeline", "video", "-video", "video_path", "-video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
         """Order results by fields."""
         ...
 
@@ -2293,7 +2317,7 @@ class ArdetectorQuery(Query[Ardetector]):
         """Return distinct results."""
         ...
 
-    def select(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
+    def select(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
         """Select specific fields."""
         ...
 
@@ -2317,7 +2341,7 @@ class ArdetectorQuery(Query[Ardetector]):
         """Add computed fields using aggregate functions."""
         ...
 
-    def group_by(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
+    def group_by(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
         """Add GROUP BY clause."""
         ...
 
@@ -2325,11 +2349,11 @@ class ArdetectorQuery(Query[Ardetector]):
         """Add HAVING clause for filtering grouped results."""
         ...
 
-    def values(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
+    def values(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
         """Return dicts instead of models."""
         ...
 
-    def values_list(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "video", "video_path"], flat: bool = False) -> "ArdetectorQuery":  # type: ignore[override]
+    def values_list(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"], flat: bool = False) -> "ArdetectorQuery":  # type: ignore[override]
         """Return tuples/values instead of models."""
         ...
 
@@ -2509,6 +2533,16 @@ class ArdetectorManager(QueryManager[Ardetector]):
         id__range: int | None = None,
         id__in: list[int] | None = None,
         id__isnull: bool | None = None,
+        timeline: str | None = None,
+        timeline__contains: str | None = None,
+        timeline__icontains: str | None = None,
+        timeline__startswith: str | None = None,
+        timeline__istartswith: str | None = None,
+        timeline__endswith: str | None = None,
+        timeline__iendswith: str | None = None,
+        timeline__iexact: str | None = None,
+        timeline__in: list[str] | None = None,
+        timeline__isnull: bool | None = None,
         video: VideoFile | None = None,
         video__in: list[VideoFile] | None = None,
         video__isnull: bool | None = None,
@@ -2585,6 +2619,16 @@ class ArdetectorManager(QueryManager[Ardetector]):
         id__range: int | None = None,
         id__in: list[int] | None = None,
         id__isnull: bool | None = None,
+        timeline: str | None = None,
+        timeline__contains: str | None = None,
+        timeline__icontains: str | None = None,
+        timeline__startswith: str | None = None,
+        timeline__istartswith: str | None = None,
+        timeline__endswith: str | None = None,
+        timeline__iendswith: str | None = None,
+        timeline__iexact: str | None = None,
+        timeline__in: list[str] | None = None,
+        timeline__isnull: bool | None = None,
         video: VideoFile | None = None,
         video__in: list[VideoFile] | None = None,
         video__isnull: bool | None = None,
@@ -2602,11 +2646,11 @@ class ArdetectorManager(QueryManager[Ardetector]):
         """Exclude objects matching field lookups."""
         ...
 
-    def values(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "video", "video_path"]) -> ArdetectorQuery:  # type: ignore[override]
+    def values(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> ArdetectorQuery:  # type: ignore[override]
         """Return dicts instead of models."""
         ...
 
-    def values_list(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "video", "video_path"], flat: bool = False) -> ArdetectorQuery:  # type: ignore[override]
+    def values_list(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"], flat: bool = False) -> ArdetectorQuery:  # type: ignore[override]
         """Return tuples/values instead of models."""
         ...
 
@@ -2763,6 +2807,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         color_pct: float | None = None,
         error: str | None = None,
         id: int | None = None,
+        timeline: str | None = None,
         video: VideoFile | None = None,
         video_path: str | None = None,
     ) -> Ardetector:
