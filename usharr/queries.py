@@ -6,7 +6,7 @@ live in ``usharr.database``; the models themselves in ``usharr.models``.
 
 Referential integrity is DB-enforced (FK CASCADE — sqlx enables
 ``PRAGMA foreign_keys`` per connection by default), so deleting a ``video_file``
-row reaps its mediainfo/ardetector/tracks; deleting a ``subtitle_file`` reaps
+row reaps its mediainfo/aspect_ratio/tracks; deleting a ``subtitle_file`` reaps
 its external tracks.
 """
 
@@ -20,7 +20,7 @@ from oxyde import Model
 from oxyde.db import transaction
 
 from usharr.models import (
-    Ardetector,
+    AspectRatio,
     AudioTrack,
     Mediainfo,
     Movie,
@@ -138,7 +138,7 @@ async def video_file_stats() -> dict[str, tuple[int, int]]:
 
 async def delete_orphans(present: Iterable[Path | str]) -> None:
     """Delete video_file rows whose path is not in ``present`` (FK cascade reaps
-    the dependent mediainfo/ardetector/track rows)."""
+    the dependent mediainfo/aspect_ratio/track rows)."""
     orphans = sorted(await list_paths() - {str(p) for p in present})
     if not orphans:
         return
@@ -193,31 +193,31 @@ async def set_mediainfo_error(path: Path | str, error: str) -> None:
 
 
 async def set_mediainfo_duration(path: Path | str, duration: float) -> None:
-    """Backfill mediainfo.duration from the ardetector pass when mediainfo didn't
+    """Backfill mediainfo.duration from the aspect_ratio pass when mediainfo didn't
     get one. No-op if no mediainfo row exists or duration is already set."""
     await Mediainfo.objects.filter(video_path=str(path), duration__isnull=True).update(
         duration=duration
     )
 
 
-# --- ardetector -----------------------------------------------------------
+# --- aspect_ratio -----------------------------------------------------------
 
 
-async def get_ardetector(path: Path | str) -> Ardetector | None:
-    return await Ardetector.objects.get_or_none(video_path=str(path))
+async def get_aspect_ratio(path: Path | str) -> AspectRatio | None:
+    return await AspectRatio.objects.get_or_none(video_path=str(path))
 
 
-async def ardetector_paths() -> set[str]:
-    """Every video_path that has an ardetector row."""
-    return set(await column(Ardetector, "video_path"))
+async def aspect_ratio_paths() -> set[str]:
+    """Every video_path that has an aspect_ratio row."""
+    return set(await column(AspectRatio, "video_path"))
 
 
-async def delete_ardetector(path: Path | str) -> None:
-    await Ardetector.objects.filter(video_path=str(path)).delete()
+async def delete_aspect_ratio(path: Path | str) -> None:
+    await AspectRatio.objects.filter(video_path=str(path)).delete()
 
 
-async def upsert_ardetector(row: Ardetector) -> None:
-    await Ardetector.objects.update_or_create(
+async def upsert_aspect_ratio(row: AspectRatio) -> None:
+    await AspectRatio.objects.update_or_create(
         video_path=row.video_path,
         defaults=row.model_dump(exclude={"id", "video", "video_path"}),
     )
@@ -256,7 +256,7 @@ async def get_subtitle_tracks(
 class PathMedia:
     mf: VideoFile
     mediainfo: Mediainfo | None
-    ardetector: Ardetector | None
+    aspect_ratio: AspectRatio | None
     audio: list[AudioTrack]
     subtitles: list[SubtitleTrackInternal | SubtitleTrackExternal]
 
@@ -269,7 +269,7 @@ async def load_path_media(path: str) -> PathMedia | None:
     return PathMedia(
         mf=mf,
         mediainfo=await get_mediainfo(path),
-        ardetector=await get_ardetector(path),
+        aspect_ratio=await get_aspect_ratio(path),
         audio=await get_audio_tracks(path),
         subtitles=[*internal, *external],
     )
@@ -319,7 +319,7 @@ async def replace_external_subtitles(
 @dataclass(frozen=True, slots=True)
 class LibraryRow:
     """One library-grid file: its video_file plus the optional mediainfo /
-    ardetector / plex_item / movie overlays, the audio + internal-subtitle
+    aspect_ratio / plex_item / movie overlays, the audio + internal-subtitle
     tracks, and the Series whose folder contains it. Holds the source models;
     the accessors expose only the identity + plex show/season/episode ordering
     keys that sorting and prev/next navigation need. Presentation (the grid's
@@ -328,7 +328,7 @@ class LibraryRow:
 
     video: VideoFile
     mediainfo: Mediainfo | None
-    ardetector: Ardetector | None
+    aspect_ratio: AspectRatio | None
     plex: PlexItem | None
     series: Series | None
     movie: Movie | None
@@ -411,7 +411,7 @@ async def library_rows(
     """The library-grid rows under any of ``paths``: every non-extra file fully
     populated and sorted by ``key``.
 
-    Pulls the video_file rows plus their mediainfo / ardetector / plex_item /
+    Pulls the video_file rows plus their mediainfo / aspect_ratio / plex_item /
     movie overlays and audio + internal-subtitle tracks, keyed by video_path,
     and resolves each file's Series by folder prefix. Bonus-feature files
     (``is_extra``) are excluded. ``key`` is the display ordering — injected so
@@ -434,7 +434,7 @@ async def library_rows(
         }
         ar = {
             a.video_path: a
-            for a in await Ardetector.objects.filter(
+            for a in await AspectRatio.objects.filter(
                 video_path__startswith=prefix
             ).all()
             if a.video_path
@@ -469,7 +469,7 @@ async def library_rows(
             LibraryRow(
                 video=v,
                 mediainfo=mi.get(v.path),
-                ardetector=ar.get(v.path),
+                aspect_ratio=ar.get(v.path),
                 plex=plex.get(v.path),
                 series=series_for(v.path, series_by_folder),
                 movie=movies.get(v.path),

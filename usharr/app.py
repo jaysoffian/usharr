@@ -272,12 +272,12 @@ async def gather_extras(path: str) -> list[dict]:
                 {
                     "mf": pm.mf,
                     "mi": pm.mediainfo,
-                    "ar": pm.ardetector,
+                    "ar": pm.aspect_ratio,
                     "audio": pm.audio,
                     "subtitle": pm.subtitles,
                     "sub_exts": fmt.subtitle_file_exts(ep, pm.subtitles),
-                    "aspect_set": pm.ardetector.aspect_samples_parsed
-                    if pm.ardetector
+                    "aspect_set": pm.aspect_ratio.aspect_samples_parsed
+                    if pm.aspect_ratio
                     else None,
                     "duration_str": fmt.format_duration(
                         pm.mediainfo.duration if pm.mediainfo else None
@@ -307,7 +307,7 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
 
     mf = pm.mf
     mi = pm.mediainfo
-    ar = pm.ardetector
+    ar = pm.aspect_ratio
     audio_rows = pm.audio
     subtitle_rows = pm.subtitles
     sub_exts = fmt.subtitle_file_exts(path, subtitle_rows)

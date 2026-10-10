@@ -54,7 +54,7 @@
   <form method="dialog">
     <div autofocus tabindex="-1" aria-hidden="true" class="status-focus-trap"></div>
     <button class="status-close" value="close" aria-label="Close"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg></button>
-    <div class="status-line" data-kind="ardetect" hidden>
+    <div class="status-line" data-kind="aspect_ratio" hidden>
       <div class="status-main"><span class="status-label">Analyzing</span> <span class="status-path"></span></div>
       <div class="status-rem"></div>
     </div>
@@ -189,12 +189,12 @@
   const statusDialog = document.getElementById('status-dialog');
   const statusLines = {
     mediainfo: statusDialog && statusDialog.querySelector('[data-kind=mediainfo]'),
-    ardetect: statusDialog && statusDialog.querySelector('[data-kind=ardetect]'),
+    aspect_ratio: statusDialog && statusDialog.querySelector('[data-kind=aspect_ratio]'),
   };
   function basename(p) { return p.split('/').pop(); }
   function renderStatus(s) {
     let active = false;
-    for (const kind of ['mediainfo', 'ardetect']) {
+    for (const kind of ['mediainfo', 'aspect_ratio']) {
       const line = statusLines[kind];
       const probing = s[kind].probing;
       const pending = s[kind].pending;

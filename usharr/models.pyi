@@ -2102,7 +2102,7 @@ class MediainfoManager(QueryManager[Mediainfo]):
         ...
 
 
-class Ardetector(Model):
+class AspectRatio(Model):
     class Meta:
         is_table: bool
         table_name: str
@@ -2121,11 +2121,11 @@ class Ardetector(Model):
     @property
     def timeline_parsed(self) -> dict | None:
         ...
-    objects: ClassVar["ArdetectorManager"]
+    objects: ClassVar["AspectRatioManager"]
 
 
-class ArdetectorQuery(Query[Ardetector]):
-    """Type-safe Query for Ardetector model."""
+class AspectRatioQuery(Query[AspectRatio]):
+    """Type-safe Query for AspectRatio model."""
 
     # Query building methods (sync, return Query)
 
@@ -2211,7 +2211,7 @@ class ArdetectorQuery(Query[Ardetector]):
         video_path__iexact: str | None = None,
         video_path__in: list[str] | None = None,
         video_path__isnull: bool | None = None,
-    ) -> "ArdetectorQuery":
+    ) -> "AspectRatioQuery":
         """Filter by Q-expressions or field lookups."""
         ...
 
@@ -2297,63 +2297,63 @@ class ArdetectorQuery(Query[Ardetector]):
         video_path__iexact: str | None = None,
         video_path__in: list[str] | None = None,
         video_path__isnull: bool | None = None,
-    ) -> "ArdetectorQuery":
+    ) -> "AspectRatioQuery":
         """Exclude objects matching field lookups."""
         ...
 
-    def order_by(self, *fields: Literal["aspect_primary", "-aspect_primary", "aspect_samples", "-aspect_samples", "aspect_widest", "-aspect_widest", "color_pct", "-color_pct", "error", "-error", "id", "-id", "timeline", "-timeline", "video", "-video", "video_path", "-video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
+    def order_by(self, *fields: Literal["aspect_primary", "-aspect_primary", "aspect_samples", "-aspect_samples", "aspect_widest", "-aspect_widest", "color_pct", "-color_pct", "error", "-error", "id", "-id", "timeline", "-timeline", "video", "-video", "video_path", "-video_path"]) -> "AspectRatioQuery":  # type: ignore[override]
         """Order results by fields."""
         ...
 
-    def limit(self, n: int) -> "ArdetectorQuery":
+    def limit(self, n: int) -> "AspectRatioQuery":
         """Limit number of results."""
         ...
 
-    def offset(self, n: int) -> "ArdetectorQuery":
+    def offset(self, n: int) -> "AspectRatioQuery":
         """Skip first n results."""
         ...
 
-    def distinct(self, value: bool = True) -> "ArdetectorQuery":
+    def distinct(self, value: bool = True) -> "AspectRatioQuery":
         """Return distinct results."""
         ...
 
-    def select(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
+    def select(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "AspectRatioQuery":  # type: ignore[override]
         """Select specific fields."""
         ...
 
-    def join(self, *paths: str) -> "ArdetectorQuery":
+    def join(self, *paths: str) -> "AspectRatioQuery":
         """Perform LEFT JOIN for relations."""
         ...
 
-    def prefetch(self, *paths: str) -> "ArdetectorQuery":
+    def prefetch(self, *paths: str) -> "AspectRatioQuery":
         """Prefetch related objects (separate queries)."""
         ...
 
-    def for_update(self) -> "ArdetectorQuery":
+    def for_update(self) -> "AspectRatioQuery":
         """Add FOR UPDATE lock to query."""
         ...
 
-    def for_share(self) -> "ArdetectorQuery":
+    def for_share(self) -> "AspectRatioQuery":
         """Add FOR SHARE lock to query."""
         ...
 
-    def annotate(self, **annotations: Any) -> "ArdetectorQuery":
+    def annotate(self, **annotations: Any) -> "AspectRatioQuery":
         """Add computed fields using aggregate functions."""
         ...
 
-    def group_by(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
+    def group_by(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "AspectRatioQuery":  # type: ignore[override]
         """Add GROUP BY clause."""
         ...
 
-    def having(self, *q_exprs: Any, **kwargs: Any) -> "ArdetectorQuery":
+    def having(self, *q_exprs: Any, **kwargs: Any) -> "AspectRatioQuery":
         """Add HAVING clause for filtering grouped results."""
         ...
 
-    def values(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "ArdetectorQuery":  # type: ignore[override]
+    def values(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> "AspectRatioQuery":  # type: ignore[override]
         """Return dicts instead of models."""
         ...
 
-    def values_list(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"], flat: bool = False) -> "ArdetectorQuery":  # type: ignore[override]
+    def values_list(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"], flat: bool = False) -> "AspectRatioQuery":  # type: ignore[override]
         """Return tuples/values instead of models."""
         ...
 
@@ -2364,7 +2364,7 @@ class ArdetectorQuery(Query[Ardetector]):
         *,
         client: Any | None = None,
         using: str | None = None,
-    ) -> list[Ardetector]:
+    ) -> list[AspectRatio]:
         """Execute query and return all results."""
         ...
 
@@ -2373,7 +2373,7 @@ class ArdetectorQuery(Query[Ardetector]):
         *,
         client: Any | None = None,
         using: str | None = None,
-    ) -> Ardetector | None:
+    ) -> AspectRatio | None:
         """Execute query and return first result."""
         ...
 
@@ -2382,7 +2382,7 @@ class ArdetectorQuery(Query[Ardetector]):
         *,
         client: Any | None = None,
         using: str | None = None,
-    ) -> Ardetector | None:
+    ) -> AspectRatio | None:
         """Execute query and return last result."""
         ...
 
@@ -2465,12 +2465,12 @@ class ArdetectorQuery(Query[Ardetector]):
         """Delete matching objects."""
         ...
 
-class ArdetectorManager(QueryManager[Ardetector]):
-    """Type-safe Manager for Ardetector model."""
+class AspectRatioManager(QueryManager[AspectRatio]):
+    """Type-safe Manager for AspectRatio model."""
 
     # Query building methods (sync, return Query)
 
-    def query(self) -> ArdetectorQuery:
+    def query(self) -> AspectRatioQuery:
         """Return a Query builder for this model."""
         ...
 
@@ -2556,7 +2556,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         video_path__iexact: str | None = None,
         video_path__in: list[str] | None = None,
         video_path__isnull: bool | None = None,
-    ) -> ArdetectorQuery:
+    ) -> AspectRatioQuery:
         """Filter by Q-expressions or field lookups."""
         ...
 
@@ -2642,35 +2642,35 @@ class ArdetectorManager(QueryManager[Ardetector]):
         video_path__iexact: str | None = None,
         video_path__in: list[str] | None = None,
         video_path__isnull: bool | None = None,
-    ) -> ArdetectorQuery:
+    ) -> AspectRatioQuery:
         """Exclude objects matching field lookups."""
         ...
 
-    def values(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> ArdetectorQuery:  # type: ignore[override]
+    def values(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"]) -> AspectRatioQuery:  # type: ignore[override]
         """Return dicts instead of models."""
         ...
 
-    def values_list(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"], flat: bool = False) -> ArdetectorQuery:  # type: ignore[override]
+    def values_list(self, *fields: Literal["aspect_primary", "aspect_samples", "aspect_widest", "color_pct", "error", "id", "timeline", "video", "video_path"], flat: bool = False) -> AspectRatioQuery:  # type: ignore[override]
         """Return tuples/values instead of models."""
         ...
 
-    def distinct(self, distinct: bool = True) -> ArdetectorQuery:
+    def distinct(self, distinct: bool = True) -> AspectRatioQuery:
         """Return distinct results."""
         ...
 
-    def join(self, *paths: str) -> ArdetectorQuery:
+    def join(self, *paths: str) -> AspectRatioQuery:
         """Perform LEFT JOIN for relations."""
         ...
 
-    def prefetch(self, *paths: str) -> ArdetectorQuery:
+    def prefetch(self, *paths: str) -> AspectRatioQuery:
         """Prefetch related objects (separate queries)."""
         ...
 
-    def for_update(self) -> ArdetectorQuery:
+    def for_update(self) -> AspectRatioQuery:
         """Add FOR UPDATE lock to query."""
         ...
 
-    def for_share(self) -> ArdetectorQuery:
+    def for_share(self) -> AspectRatioQuery:
         """Add FOR SHARE lock to query."""
         ...
 
@@ -2682,7 +2682,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         client: Any | None = None,
         using: str | None = None,
         **filters: Any,
-    ) -> Ardetector:
+    ) -> AspectRatio:
         """Get single object matching lookups."""
         ...
 
@@ -2692,7 +2692,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         client: Any | None = None,
         using: str | None = None,
         **filters: Any,
-    ) -> Ardetector | None:
+    ) -> AspectRatio | None:
         """Get object or None if not found."""
         ...
 
@@ -2703,7 +2703,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         client: Any | None = None,
         using: str | None = None,
         **filters: Any,
-    ) -> tuple[Ardetector, bool]:
+    ) -> tuple[AspectRatio, bool]:
         """Get object or create if not found. Returns (object, created)."""
         ...
 
@@ -2714,7 +2714,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         client: Any | None = None,
         using: str | None = None,
         **filters: Any,
-    ) -> tuple[Ardetector, bool]:
+    ) -> tuple[AspectRatio, bool]:
         """Get object, create if missing, or update it when defaults are provided."""
         ...
 
@@ -2724,7 +2724,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         client: Any | None = None,
         using: str | None = None,
         mode: str = "models",
-    ) -> list[Ardetector]:
+    ) -> list[AspectRatio]:
         """Get all objects."""
         ...
 
@@ -2733,7 +2733,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         *,
         client: Any | None = None,
         using: str | None = None,
-    ) -> Ardetector | None:
+    ) -> AspectRatio | None:
         """Get first object."""
         ...
 
@@ -2742,7 +2742,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
         *,
         client: Any | None = None,
         using: str | None = None,
-    ) -> Ardetector | None:
+    ) -> AspectRatio | None:
         """Get last object."""
         ...
 
@@ -2798,7 +2798,7 @@ class ArdetectorManager(QueryManager[Ardetector]):
     async def create(  # type: ignore[override]
         self,
         *,
-        instance: Ardetector | None = None,
+        instance: AspectRatio | None = None,
         client: Any | None = None,
         using: str | None = None,
         aspect_primary: float | None = None,
@@ -2810,24 +2810,24 @@ class ArdetectorManager(QueryManager[Ardetector]):
         timeline: str | None = None,
         video: VideoFile | None = None,
         video_path: str | None = None,
-    ) -> Ardetector:
+    ) -> AspectRatio:
         """Create new object."""
         ...
 
     async def bulk_create(  # type: ignore[override]
         self,
-        objects: list[Ardetector],
+        objects: list[AspectRatio],
         *,
         batch_size: int | None = None,
         client: Any | None = None,
         using: str | None = None,
-    ) -> list[Ardetector]:
+    ) -> list[AspectRatio]:
         """Bulk create objects."""
         ...
 
     async def bulk_update(  # type: ignore[override]
         self,
-        objects: list[Ardetector],
+        objects: list[AspectRatio],
         fields: list[str],
         *,
         client: Any | None = None,

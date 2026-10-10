@@ -11,7 +11,7 @@ from typing import NamedTuple
 from usharr import format as fmt
 from usharr import plex_sync, queries, radarr_sync, sonarr_sync, subtitles
 from usharr.config import get_config
-from usharr.probers import ArdetectorProber, MediainfoProber
+from usharr.probers import AspectRatioProber, MediainfoProber
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class Scanner:
 
     def __init__(self) -> None:
         self.mediainfo = MediainfoProber()
-        self.ardetector = ArdetectorProber()
+        self.aspect_ratio = AspectRatioProber()
         self.queue: asyncio.Queue[ScanRequest] = asyncio.Queue()
         self.tasks: tuple[asyncio.Task, ...] = ()
         # Bumped once per processed queue request; readers cache derived
@@ -112,14 +112,14 @@ class Scanner:
             await queries.delete_mediainfo(req.path)
             self.mediainfo.enqueue(req.path, priority=-time.monotonic())
         if req.force_detect:
-            await queries.delete_ardetector(req.path)
-            self.ardetector.enqueue(req.path, priority=-time.monotonic())
+            await queries.delete_aspect_ratio(req.path)
+            self.aspect_ratio.enqueue(req.path, priority=-time.monotonic())
 
     def start(self) -> None:
         """Spawn every long-lived worker. Call once from lifespan / CLI."""
         self.tasks = (
             asyncio.create_task(self.mediainfo.process_queue_forever()),
-            asyncio.create_task(self.ardetector.process_queue_forever()),
+            asyncio.create_task(self.aspect_ratio.process_queue_forever()),
             asyncio.create_task(self.process_queue_forever()),
             asyncio.create_task(self.scan_forever()),
         )
@@ -176,7 +176,7 @@ class Scanner:
         # file costs no round trip at all.
         recorded = await queries.video_file_stats()
         mediainfo_paths = await queries.mediainfo_paths()
-        ardetector_paths = await queries.ardetector_paths()
+        aspect_ratio_paths = await queries.aspect_ratio_paths()
         sidecars_by_video = await queries.subtitle_files_by_video()
 
         for video in videos:
@@ -194,12 +194,12 @@ class Scanner:
             if changed or req.force_refresh:
                 await queries.delete_mediainfo(path)
             if changed or req.force_detect:
-                await queries.delete_ardetector(path)
+                await queries.delete_aspect_ratio(path)
 
             if changed or req.force_refresh or key not in mediainfo_paths:
                 self.mediainfo.enqueue(path)
-            if changed or req.force_detect or key not in ardetector_paths:
-                self.ardetector.enqueue(path)
+            if changed or req.force_detect or key not in aspect_ratio_paths:
+                self.aspect_ratio.enqueue(path)
 
             # Reconcile sidecars from disk every scan so adds/deletes/edits
             # are caught; cheap when nothing changed (compare only).

@@ -344,7 +344,7 @@ def format_ratio(r: float) -> str:
 
 
 def format_color(color_pct: float | None) -> str:
-    """Render ardetector color_pct as a Video-table value, paired with
+    """Render aspect_ratio color_pct as a Video-table value, paired with
     the "Color" row label. The parenthetical pct always refers to the
     dominant class. 5/95 buffer at the extremes absorbs detector noise.
       * color_pct <= 5%  → "Monochrome"

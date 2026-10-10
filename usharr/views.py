@@ -80,12 +80,12 @@ def sub_chip(r: queries.LibraryRow) -> dict | None:
 
 
 def has_error(r: queries.LibraryRow) -> bool:
-    mi, ar = r.mediainfo, r.ardetector
+    mi, ar = r.mediainfo, r.aspect_ratio
     return bool((mi.error if mi else None) or (ar.error if ar else None))
 
 
 def aspects(r: queries.LibraryRow) -> tuple[list[dict], bool]:
-    ar = r.ardetector
+    ar = r.aspect_ratio
     aspect_set = ar.aspect_samples_parsed if ar else None
     return fmt.format_aspects_for_row(aspect_set, ar.aspect_primary if ar else None)
 
@@ -342,19 +342,19 @@ def dash(v: object) -> object:
     return v if v not in (None, "") else "—"
 
 
-def color(ar: models.Ardetector | None) -> str:
+def color(ar: models.AspectRatio | None) -> str:
     return fmt.format_color(ar.color_pct if ar else None)
 
 
 def detail_error(
-    mi: models.Mediainfo | None, ar: models.Ardetector | None
+    mi: models.Mediainfo | None, ar: models.AspectRatio | None
 ) -> str | None:
-    """The combined ``mediainfo: .. ; ardetector: ..`` string, or None."""
+    """The combined ``mediainfo: .. ; aspect_ratio: ..`` string, or None."""
     errors: list[str] = []
     if mi and mi.error:
         errors.append(f"mediainfo: {mi.error}")
     if ar and ar.error:
-        errors.append(f"ardetector: {ar.error}")
+        errors.append(f"aspect_ratio: {ar.error}")
     return "; ".join(errors) if errors else None
 
 
@@ -390,7 +390,7 @@ class DisplayFrame:
         return (ICON_WIDTH - w) // 2, (ICON_HEIGHT - h) // 2, w, h
 
 
-def display_frame(ar: models.Ardetector | None) -> DisplayFrame | None:
+def display_frame(ar: models.AspectRatio | None) -> DisplayFrame | None:
     """The file's display frame from the stored timeline, for the crop icons;
     None for a row without a timeline."""
     data = ar.timeline_parsed if ar else None
@@ -401,7 +401,7 @@ def display_frame(ar: models.Ardetector | None) -> DisplayFrame | None:
     return DisplayFrame(sar=sar, scale=scale)
 
 
-def timeline_rows(ar: models.Ardetector | None) -> list[TimelineRow]:
+def timeline_rows(ar: models.AspectRatio | None) -> list[TimelineRow]:
     """The stored sample timeline rebuilt into segments for the detail page,
     or nothing for a single-segment file or a row without a timeline."""
     data = ar.timeline_parsed if ar else None

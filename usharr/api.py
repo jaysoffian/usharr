@@ -70,7 +70,7 @@ class AspectInfo(BaseModel):
 class InfoResponse(BaseModel):
     path: str
     mediainfo_error: str | None = None
-    ardetector_error: str | None = None
+    aspect_ratio_error: str | None = None
     container: str | None = None
     duration: float | None = None
     video: VideoInfo
@@ -101,7 +101,7 @@ async def build_info(
 ) -> InfoResponse:
     path = mf.path
     mi = await queries.get_mediainfo(path)
-    ar = await queries.get_ardetector(path)
+    ar = await queries.get_aspect_ratio(path)
     internal_subs, external_subs = await queries.get_subtitle_tracks(path)
     samples_raw = ar.aspect_samples_parsed if ar else None
     samples = [AspectSample(**s) for s in samples_raw] if samples_raw else None
@@ -117,7 +117,7 @@ async def build_info(
     return response_cls(
         path=path,
         mediainfo_error=mi.error if mi else None,
-        ardetector_error=ar.error if ar else None,
+        aspect_ratio_error=ar.error if ar else None,
         container=mi.container if mi else None,
         duration=mi.duration if mi else None,
         video=VideoInfo.model_validate(mi, from_attributes=True) if mi else VideoInfo(),
@@ -136,13 +136,13 @@ async def build_info(
 def status_snapshot() -> dict:
     """Live state of both probers, shaped for the topbar status UI."""
     mi = scanner.mediainfo
-    ar = scanner.ardetector
+    ar = scanner.aspect_ratio
     return {
         "mediainfo": {
             "probing": str(mi.probing) if mi.probing else None,
             "pending": len(mi),
         },
-        "ardetect": {
+        "aspect_ratio": {
             "probing": str(ar.probing) if ar.probing else None,
             "pending": len(ar),
         },

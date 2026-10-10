@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field, replace
 from itertools import pairwise
 from pathlib import Path
 
-from usharr.models import Ardetector
+from usharr.models import AspectRatio
 
 logger = logging.getLogger(__name__)
 
@@ -1924,8 +1924,8 @@ async def detect(path: Path) -> DetectionResult:
     )
 
 
-def to_ardetector_row(path: Path, result: DetectionResult) -> Ardetector:
-    return Ardetector.model_validate(
+def to_aspect_ratio_row(path: Path, result: DetectionResult) -> AspectRatio:
+    return AspectRatio.model_validate(
         {
             "video_path": str(path),
             "aspect_primary": result.primary_aspect,

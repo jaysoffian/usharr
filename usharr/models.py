@@ -81,7 +81,7 @@ class Mediainfo(Model):
         ]
 
 
-class Ardetector(Model):
+class AspectRatio(Model):
     id: int | None = Field(default=None, db_pk=True)
     video: VideoFile | None = Field(
         default=None, db_on_delete="CASCADE", db_nullable=False
