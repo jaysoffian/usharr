@@ -10,7 +10,7 @@ from fastapi import APIRouter, Form, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from usharr import ardetector, models, plex, probers, queries
+from usharr import aspect_ratio, models, plex, probers, queries
 from usharr.config import get_config
 from usharr.scanner import ScanRequest, scanner
 
@@ -109,7 +109,7 @@ async def build_info(
     segments = (
         [
             TimelineSegment.model_validate(seg, from_attributes=True)
-            for seg in ardetector.stored_segments(timeline)
+            for seg in aspect_ratio.stored_segments(timeline)
         ]
         if timeline
         else None

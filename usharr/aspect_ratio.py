@@ -1339,7 +1339,7 @@ def summarize_after_recheck(vi: VideoInfo, before: Summary) -> Summary:
 # --------------------------------------------------------------------------
 # Stored timeline
 #
-# Every sample is kept in the ardetector row as JSON so segments, insets,
+# Every sample is kept in the aspect_ratio row as JSON so segments, insets,
 # snapping and the primary can be rebuilt from the database by the functions
 # above without decoding the file again. Samples the recheck narrowed carry
 # their first reading under "orig"; samples it rejected are kept with their

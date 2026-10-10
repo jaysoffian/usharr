@@ -11,7 +11,7 @@ display columns.
 from collections import Counter
 from dataclasses import dataclass
 
-from usharr import ardetector, models, queries
+from usharr import aspect_ratio, models, queries
 from usharr import format as fmt
 from usharr.audio_title import clean_audio_title
 from usharr.config import Config
@@ -407,7 +407,7 @@ def timeline_rows(ar: models.Ardetector | None) -> list[TimelineRow]:
     data = ar.timeline_parsed if ar else None
     if not data:
         return []
-    segments = ardetector.stored_segments(data)
+    segments = aspect_ratio.stored_segments(data)
     if len(segments) < 2:
         return []
     return [

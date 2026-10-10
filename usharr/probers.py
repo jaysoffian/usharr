@@ -9,7 +9,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from usharr import ardetector, mediainfo, queries
+from usharr import aspect_ratio, mediainfo, queries
 from usharr.models import Ardetector
 
 
@@ -112,7 +112,7 @@ class ArdetectorProber(Prober):
 
     async def probe(self, path: Path) -> None:
         try:
-            result = await ardetector.detect(path)
+            result = await aspect_ratio.detect(path)
         except Exception as exc:
             self.logger.exception("%s: %s", path, exc)
             await queries.upsert_ardetector(
@@ -122,7 +122,7 @@ class ArdetectorProber(Prober):
             )
             return
 
-        await queries.upsert_ardetector(ardetector.to_ardetector_row(path, result))
+        await queries.upsert_ardetector(aspect_ratio.to_ardetector_row(path, result))
         # Backfill duration onto mediainfo if mediainfo didn't get one since
         # the AR sampler measures runtime as a side effect.
         if result.duration is not None:

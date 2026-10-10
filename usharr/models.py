@@ -3,7 +3,7 @@
 Schema notes:
   * ``video_file`` is the discovery row (path/size/mtime); a row exists iff the
     file has been seen on disk.
-  * ``mediainfo`` / ``ardetector`` are 1:1 with ``video_file`` (one surrogate-id
+  * ``mediainfo`` / ``aspect_ratio`` are 1:1 with ``video_file`` (one surrogate-id
     row per probed file, a unique ``video_path``). Row presence ⇒ probed; the
     ``error`` column distinguishes success from a recorded failure.
   * Subtitle tracks split by origin: ``subtitle_track_internal`` (container
@@ -91,15 +91,15 @@ class Ardetector(Model):
     aspect_widest: float | None = None
     aspect_samples: str | None = Field(default=None, db_type="TEXT")  # JSON list
     color_pct: float | None = None  # 0.0=monochrome, 1.0=color; NULL=unknown
-    # JSON object of every sample taken (ardetector.timeline_json); NULL on
+    # JSON object of every sample taken (aspect_ratio.timeline_json); NULL on
     # rows detected before it was recorded.
     timeline: str | None = Field(default=None, db_type="TEXT")
 
     class Meta:
         is_table = True
-        table_name = "ardetector"
+        table_name = "aspect_ratio"
         indexes: ClassVar[list[Index]] = [
-            Index(("video_path",), unique=True, name="ardetector_video_uq")
+            Index(("video_path",), unique=True, name="aspect_ratio_video_uq")
         ]
 
     @property

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from usharr import ardetector
+from usharr import aspect_ratio
 
 PICTURE = "60+mod(X*3+Y*7,20)"
 # 1.43 inside 640x360: 516 wide, 62 px bars each side.
@@ -52,11 +52,11 @@ def render(path: Path, luma: str, bit_depth: int = 8) -> Path:
     return path
 
 
-def detect(path: Path) -> ardetector.DetectionResult:
-    return asyncio.run(ardetector.detect(path))
+def detect(path: Path) -> aspect_ratio.DetectionResult:
+    return asyncio.run(aspect_ratio.detect(path))
 
 
-def aspects(result: ardetector.DetectionResult) -> list[float]:
+def aspects(result: aspect_ratio.DetectionResult) -> list[float]:
     return [d.aspect for d in result.detected]
 
 
@@ -64,7 +64,7 @@ def test_single_ar_is_never_rechecked(tmp_path: Path, monkeypatch: pytest.Monkey
     async def fail(*args: object):
         raise AssertionError("recheck ran on a single-AR file")
 
-    monkeypatch.setattr(ardetector, "recheck_minority", fail)
+    monkeypatch.setattr(aspect_ratio, "recheck_minority", fail)
     video = render(tmp_path / "pillarbox.mkv", f"if({PILLARBOX}, 16, {PICTURE})")
     result = detect(video)
     assert aspects(result) == [1.43]
@@ -141,16 +141,16 @@ def sample_output(x1: int, x2: int, y1: int, y2: int, pts_time: float) -> str:
 
 
 def test_sample_time_is_the_decoded_frame_time():
-    vi = ardetector.VideoInfo(width=640, height=360, ar_sample=1.0)
-    ardetector.parse_sample(sample_output(0, 639, 46, 313, -1.75), 1850, vi, "1")
+    vi = aspect_ratio.VideoInfo(width=640, height=360, ar_sample=1.0)
+    aspect_ratio.parse_sample(sample_output(0, 639, 46, 313, -1.75), 1850, vi, "1")
     assert vi.timeline == [(1849, 2.38806, 640, 268)]
-    assert ardetector.frame_time("no frame line", 1850) == 1850
+    assert aspect_ratio.frame_time("no frame line", 1850) == 1850
 
 
 def test_second_request_on_the_same_frame_is_dropped():
-    vi = ardetector.VideoInfo(width=640, height=360, ar_sample=1.0)
-    ardetector.parse_sample(sample_output(0, 639, 0, 359, -1.2), 1850, vi, "1")
-    ardetector.parse_sample(sample_output(0, 639, 0, 359, -2.2), 1851, vi, "2")
+    vi = aspect_ratio.VideoInfo(width=640, height=360, ar_sample=1.0)
+    aspect_ratio.parse_sample(sample_output(0, 639, 0, 359, -1.2), 1850, vi, "1")
+    aspect_ratio.parse_sample(sample_output(0, 639, 0, 359, -2.2), 1851, vi, "2")
     assert vi.timeline == [(1849, 1.777778, 640, 360)]
     assert vi.sample_count == 1
     # The dropped duplicate counts for nothing, chroma included.
@@ -167,14 +167,14 @@ def test_boundary_midpoints():
         (400, 2.39, 640, 268),
         (424, 1.78, 640, 360),  # differs, 24 s apart: 412
     ]
-    assert ardetector.boundary_midpoints(timeline, set()) == {180, 254, 412}
+    assert aspect_ratio.boundary_midpoints(timeline, set()) == {180, 254, 412}
     # 254 was requested and rejected: bisect the longer half, 254-300, next.
     # 408 and 416 were too: every stretch of 400-424 is under the floor.
-    assert ardetector.boundary_midpoints(timeline, {254, 408, 416}) == {180, 277}
+    assert aspect_ratio.boundary_midpoints(timeline, {254, 408, 416}) == {180, 277}
 
 
 def segment(start: int, end: int, ar: float, w: int, h: int, n: int):
-    return ardetector.Segment(
+    return aspect_ratio.Segment(
         start_sec=start, end_sec=end, ar_median=ar, width=w, height=h, sample_count=n
     )
 
@@ -190,8 +190,8 @@ def test_shares_come_from_runtime_not_sample_counts():
         segment(1000, 1200, 2.38806, 640, 268, 12),
         segment(1220, 3600, 1.777778, 640, 360, 20),
     ]
-    vi = ardetector.VideoInfo(width=640, height=360, duration=4000)
-    summary = ardetector.summarize_segments(segments, vi)
+    vi = aspect_ratio.VideoInfo(width=640, height=360, duration=4000)
+    summary = aspect_ratio.summarize_segments(segments, vi)
     spans = [(s.span_start_sec, s.span_end_sec) for s in summary.segments]
     # Window is 2 %..92 % of the duration; the inset's runtime goes to the
     # 1.78 runs on either side of it.
@@ -205,7 +205,7 @@ def test_shares_come_from_runtime_not_sample_counts():
 
 
 def test_timeline_json_round_trip():
-    vi = ardetector.VideoInfo(
+    vi = aspect_ratio.VideoInfo(
         width=1920,
         height=1080,
         duration=5400,
@@ -216,7 +216,7 @@ def test_timeline_json_round_trip():
         narrowed={200: (200, 2.0, 1920, 960)},
         rejected=[(150, 1.54, 1664, 1080)],
     )
-    stored = ardetector.timeline_json(vi)
+    stored = aspect_ratio.timeline_json(vi)
     assert stored["samples"] == [
         {"t": 100, "ar": 1.433333, "w": 1548, "h": 1080},
         {"t": 150, "ar": 1.54, "w": 1664, "h": 1080, "rejected": True},
@@ -228,7 +228,7 @@ def test_timeline_json_round_trip():
             "orig": {"ar": 2.0, "w": 1920, "h": 960},
         },
     ]
-    back = ardetector.timeline_from_json(json.loads(json.dumps(stored)))
+    back = aspect_ratio.timeline_from_json(json.loads(json.dumps(stored)))
     assert back.timeline == [(100, 1.433333, 1548, 1080), (200, 1.777778, 1920, 1080)]
     assert (back.width, back.height, back.duration) == (1920, 1080, 5400)
     assert (back.bit_depth, back.dark_level, back.ar_sample) == (8, 24, 1.0)
@@ -258,7 +258,7 @@ def test_stored_segments_mark_insets_and_rejected_runs():
             sample(600, 1.777778, 1920, 1080),
         ],
     }
-    segments = ardetector.stored_segments(stored)
+    segments = aspect_ratio.stored_segments(stored)
     assert [
         (s.start_sec, s.end_sec, s.aspect, s.inset, s.rejected) for s in segments
     ] == [
@@ -293,7 +293,7 @@ def test_stored_segments_merge_runs_split_by_a_lone_reading():
             sample(700, 2.38806, 1920, 804),
         ],
     }
-    segments = ardetector.stored_segments(stored)
+    segments = aspect_ratio.stored_segments(stored)
     assert [(s.start_sec, s.end_sec, s.aspect, s.inset) for s in segments] == [
         (20, 550, 1.78, False),
         (550, 920, 2.40, False),
