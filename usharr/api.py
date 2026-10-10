@@ -6,9 +6,9 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Annotated, Any, overload
 
-from fastapi import APIRouter, Form, HTTPException, Response
+from fastapi import APIRouter, File, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from usharr import aspect_ratio, models, plex, probers, queries
 from usharr.config import get_config
@@ -211,13 +211,16 @@ async def get_info(file_path: str) -> InfoResponse:
 
 
 @api.post("/webhook")
-async def webhook(form: Annotated[plex.PlexWebhookForm, Form()]) -> Response:
-    """Handle Plex webhook"""
-    payload = form.payload
-
-    if payload.event == "library.new":
+async def webhook(payload: Annotated[bytes, File()]) -> Response:
+    """Queue a scan on library.new Plex webhook request."""
+    try:
+        event = plex.PlexWebhookPayload.model_validate_json(payload).event
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422, detail=exc.errors(include_input=False)
+        ) from exc
+    if event == "library.new":
         await scanner.enqueue(ScanRequest())
-
     return Response(status_code=204)
 
 

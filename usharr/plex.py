@@ -12,7 +12,6 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any
 
 import httpx
 from pydantic import (
@@ -21,7 +20,6 @@ from pydantic import (
     Field,
     TypeAdapter,
     ValidationError,
-    model_validator,
 )
 
 from usharr import http
@@ -104,17 +102,6 @@ class PlexMetadataResponse(PlexModel):
 
 class PlexWebhookPayload(PlexModel):
     event: str
-
-    @model_validator(mode="before")
-    @classmethod
-    def parse_json_string(cls, value: Any) -> Any:
-        if isinstance(value, str):
-            return cls.model_validate_json(value)
-        return value
-
-
-class PlexWebhookForm(PlexModel):
-    payload: PlexWebhookPayload
 
 
 RESOURCES_ADAPTER: TypeAdapter[list[PlexResource]] = TypeAdapter(list[PlexResource])
