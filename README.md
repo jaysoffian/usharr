@@ -67,9 +67,13 @@ Integration buttons link directly to the media item in any configured integratio
 - `/api` JSON API, documented at `/docs` (Swagger UI) and `/redoc` (ReDoc)
 - `/health` for monitoring
 
-### Webhooks
+### Scanning on library changes
 
-Point Plex Server → Settings → Webhooks at `http://usharr:8555/api/webhook`. On `library.new`, Usharr does a scan for new items.
+Point Plex Server → Settings → Webhooks at `http://usharr:8555/api/webhook`. On `library.new`, Usharr does a library scan for changes.
+
+Point a Radarr and/or Sonarr webhook at `http://usharr:8555/api/task/scan`, selecting any events which change the library.
+
+(The library is scanned hourly for changes in any case.)
 
 ## Plex
 
