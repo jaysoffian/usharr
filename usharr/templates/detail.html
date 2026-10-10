@@ -50,7 +50,7 @@
   <thead><tr><th>Ratio</th><th>Measured</th><th>Start</th><th>Duration</th><th></th></tr></thead>
   <tbody>
   {% for seg in timeline %}
-    <tr class="{{ 'inset' if seg.inset else '' }}">
+    <tr class="{{ 'excluded' if seg.inset or seg.rejected else '' }}">
       <td>{{ seg.aspect }}</td>
       <td><span class="subtle">{{ '%.3f (%d×%d)' % (seg.measured, seg.width, seg.height) }}</span></td>
       <td>{{ seg.start }}</td>

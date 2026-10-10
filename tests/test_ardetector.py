@@ -234,7 +234,7 @@ def test_timeline_json_round_trip():
     assert (back.bit_depth, back.dark_level, back.ar_sample) == (8, 24, 1.0)
 
 
-def test_stored_segments_skip_rejected_and_mark_insets():
+def test_stored_segments_mark_insets_and_rejected_runs():
     def sample(t: int, ar: float, w: int, h: int, **extra: object) -> dict:
         return {"t": t, "ar": ar, "w": w, "h": h, **extra}
 
@@ -251,7 +251,7 @@ def test_stored_segments_skip_rejected_and_mark_insets():
             sample(200, 1.777778, 1920, 1080),
             sample(300, 1.333333, 1200, 900),
             sample(320, 1.333333, 1200, 900),
-            # Two rejected 2.39 readings: a segment if they were counted.
+            # Two rejected 2.39 readings: a run on the page, not a ratio.
             sample(400, 2.38806, 1920, 804, rejected=True),
             sample(420, 2.38806, 1920, 804, rejected=True),
             sample(500, 1.777778, 1920, 1080),
@@ -259,12 +259,15 @@ def test_stored_segments_skip_rejected_and_mark_insets():
         ],
     }
     segments = ardetector.stored_segments(stored)
-    assert [(s.start_sec, s.end_sec, s.aspect, s.inset) for s in segments] == [
-        (20, 250, 1.78, False),
-        (250, 410, 1.33, True),
-        (410, 920, 1.78, False),
+    assert [
+        (s.start_sec, s.end_sec, s.aspect, s.inset, s.rejected) for s in segments
+    ] == [
+        (20, 250, 1.78, False, False),
+        (250, 360, 1.33, True, False),
+        (360, 460, 2.40, False, True),
+        (460, 920, 1.78, False, False),
     ]
-    assert segments[1].duration_sec == 160
+    assert segments[1].duration_sec == 110
     assert (segments[1].width, segments[1].height) == (1200, 900)
 
 

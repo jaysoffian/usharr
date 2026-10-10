@@ -805,7 +805,8 @@ table.tracks td.wrap {
 }
 table.ars-table tr.primary td { color: var(--accent); font-weight: 600; }
 table.ars-table.timeline { margin-top: 12px; }
-table.ars-table tr.inset td { color: var(--fg-dim); }
+table.ars-table tr.excluded td { color: var(--fg-dim); }
+table.ars-table tr.excluded td:first-child { text-decoration: line-through; }
 table.ars-table svg { vertical-align: middle; overflow: visible; }
 
 pre.err {

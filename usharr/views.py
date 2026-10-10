@@ -368,6 +368,7 @@ class TimelineRow:
     width: int
     height: int
     inset: bool
+    rejected: bool
 
 
 # The crop icons draw every crop inside the 16:9 signal a player outputs.
@@ -419,6 +420,7 @@ def timeline_rows(ar: models.Ardetector | None) -> list[TimelineRow]:
             width=seg.width,
             height=seg.height,
             inset=seg.inset,
+            rejected=seg.rejected,
         )
         for seg in segments
     ]

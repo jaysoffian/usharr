@@ -1398,23 +1398,29 @@ class TimelineSegment:
     width: int
     height: int
     inset: bool
+    rejected: bool  # a run of samples the recheck rejected
 
     @property
     def duration_sec(self) -> int:
         return self.end_sec - self.start_sec
 
 
+# How a run in the timeline table relates to the ratio list: a presented
+# run counts toward it, an inset or a rejected run is shown but does not.
+PRESENTED, INSET, REJECTED = "presented", "inset", "rejected"
+
+
 def merge_same_aspect(
-    runs: list[tuple[Segment, bool]],
-) -> list[tuple[Segment, bool]]:
-    """Join neighbouring runs that snap to the same AR and are both insets or
-    both not: a lone reading between two runs of one ratio is not a boundary.
-    The joined run keeps the measurement of the larger run."""
-    merged: list[tuple[Segment, bool]] = []
-    for seg, inset in runs:
+    runs: list[tuple[Segment, str]],
+) -> list[tuple[Segment, str]]:
+    """Join neighbouring runs of the same kind that snap to the same AR: a
+    lone reading between two runs of one ratio is not a boundary. The joined
+    run keeps the measurement of the larger run."""
+    merged: list[tuple[Segment, str]] = []
+    for seg, kind in runs:
         if merged:
-            previous, previous_inset = merged[-1]
-            if previous_inset == inset and round_ar(previous.ar_median) == round_ar(
+            previous, previous_kind = merged[-1]
+            if previous_kind == kind and round_ar(previous.ar_median) == round_ar(
                 seg.ar_median
             ):
                 larger = max(previous, seg, key=lambda run: run.sample_count)
@@ -1425,22 +1431,40 @@ def merge_same_aspect(
                         end_sec=seg.end_sec,
                         sample_count=previous.sample_count + seg.sample_count,
                     ),
-                    inset,
+                    kind,
                 )
                 continue
-        merged.append((seg, inset))
+        merged.append((seg, kind))
     return merged
 
 
 def stored_segments(data: dict) -> list[TimelineSegment]:
-    """The stored timeline rebuilt into runtime-ordered segments, insets
-    included and marked, each spanning the runtime it stands for."""
+    """The stored timeline rebuilt into runtime-ordered segments, each
+    spanning the runtime it stands for. Insets and runs of rejected samples
+    are included and marked, so an insert the ratio list leaves out is still
+    on the page."""
     vi = timeline_from_json(data)
     segments = detect_segments(vi)
     if not segments:
         return []
     kept = {id(seg) for seg in drop_insets(segments)}
-    runs = merge_same_aspect([(seg, id(seg) not in kept) for seg in segments])
+    rejected = detect_segments(
+        replace(
+            vi,
+            timeline=[
+                (s["t"], s["ar"], s["w"], s["h"])
+                for s in data["samples"]
+                if s.get("rejected")
+            ],
+        )
+    )
+    runs = merge_same_aspect(
+        sorted(
+            [(seg, PRESENTED if id(seg) in kept else INSET) for seg in segments]
+            + [(seg, REJECTED) for seg in rejected],
+            key=lambda run: run[0].start_sec,
+        )
+    )
     spans = with_spans([seg for seg, _ in runs], *analysis_window(vi.duration))
     return [
         TimelineSegment(
@@ -1450,9 +1474,10 @@ def stored_segments(data: dict) -> list[TimelineSegment]:
             measured=seg.ar_median,
             width=seg.width,
             height=seg.height,
-            inset=inset,
+            inset=kind == INSET,
+            rejected=kind == REJECTED,
         )
-        for (seg, inset), span in zip(runs, spans, strict=True)
+        for (seg, kind), span in zip(runs, spans, strict=True)
     ]
 
 

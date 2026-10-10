@@ -55,6 +55,7 @@ class TimelineSegment(BaseModel):
     width: int
     height: int
     inset: bool
+    rejected: bool
 
 
 class AspectInfo(BaseModel):
