@@ -89,6 +89,10 @@ usharr auth --status   # show the link state
 usharr auth --reset    # forget the stored token
 ```
 
+### Posters
+
+Usharr has limited support for customizing Plex movie posters in order to add the movie edition, if any, to each movie poster. This is similar to [Kometa overlays](https://kometa.wiki/en/latest/files/overlays/), but more limited in scope, supporting only the edition tag, and only supporting a text overlay, not an image overlay. See `config.yaml.example` for how to enable and configure this feature.
+
 ## Podman
 
 ```bash

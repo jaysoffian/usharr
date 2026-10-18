@@ -10,6 +10,7 @@ from oxyde import Model
 from oxyde.queries import Query, QueryManager
 
 import json
+from datetime import datetime
 from typing import ClassVar
 from oxyde import Field, Index, Model
 
@@ -5281,6 +5282,7 @@ class PlexItem(Model):
     show_title: str | None
     season_number: int | None
     episode_number: int | None
+    edition: str | None
     video: VideoFile | None
     video_path: str | None
     objects: ClassVar["PlexItemManager"]
@@ -5294,6 +5296,16 @@ class PlexItemQuery(Query[PlexItem]):
     def filter(
         self,
         *args: Any,
+        edition: str | None = None,
+        edition__contains: str | None = None,
+        edition__icontains: str | None = None,
+        edition__startswith: str | None = None,
+        edition__istartswith: str | None = None,
+        edition__endswith: str | None = None,
+        edition__iendswith: str | None = None,
+        edition__iexact: str | None = None,
+        edition__in: list[str] | None = None,
+        edition__isnull: bool | None = None,
         episode_number: int | None = None,
         episode_number__gt: int | None = None,
         episode_number__gte: int | None = None,
@@ -5381,6 +5393,16 @@ class PlexItemQuery(Query[PlexItem]):
     def exclude(
         self,
         *args: Any,
+        edition: str | None = None,
+        edition__contains: str | None = None,
+        edition__icontains: str | None = None,
+        edition__startswith: str | None = None,
+        edition__istartswith: str | None = None,
+        edition__endswith: str | None = None,
+        edition__iendswith: str | None = None,
+        edition__iexact: str | None = None,
+        edition__in: list[str] | None = None,
+        edition__isnull: bool | None = None,
         episode_number: int | None = None,
         episode_number__gt: int | None = None,
         episode_number__gte: int | None = None,
@@ -5465,7 +5487,7 @@ class PlexItemQuery(Query[PlexItem]):
         """Exclude objects matching field lookups."""
         ...
 
-    def order_by(self, *fields: Literal["episode_number", "-episode_number", "rating_key", "-rating_key", "season_number", "-season_number", "show_title", "-show_title", "title", "-title", "type", "-type", "video", "-video", "video_path", "-video_path", "year", "-year"]) -> "PlexItemQuery":  # type: ignore[override]
+    def order_by(self, *fields: Literal["edition", "-edition", "episode_number", "-episode_number", "rating_key", "-rating_key", "season_number", "-season_number", "show_title", "-show_title", "title", "-title", "type", "-type", "video", "-video", "video_path", "-video_path", "year", "-year"]) -> "PlexItemQuery":  # type: ignore[override]
         """Order results by fields."""
         ...
 
@@ -5481,7 +5503,7 @@ class PlexItemQuery(Query[PlexItem]):
         """Return distinct results."""
         ...
 
-    def select(self, *fields: Literal["episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"]) -> "PlexItemQuery":  # type: ignore[override]
+    def select(self, *fields: Literal["edition", "episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"]) -> "PlexItemQuery":  # type: ignore[override]
         """Select specific fields."""
         ...
 
@@ -5505,7 +5527,7 @@ class PlexItemQuery(Query[PlexItem]):
         """Add computed fields using aggregate functions."""
         ...
 
-    def group_by(self, *fields: Literal["episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"]) -> "PlexItemQuery":  # type: ignore[override]
+    def group_by(self, *fields: Literal["edition", "episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"]) -> "PlexItemQuery":  # type: ignore[override]
         """Add GROUP BY clause."""
         ...
 
@@ -5513,11 +5535,11 @@ class PlexItemQuery(Query[PlexItem]):
         """Add HAVING clause for filtering grouped results."""
         ...
 
-    def values(self, *fields: Literal["episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"]) -> "PlexItemQuery":  # type: ignore[override]
+    def values(self, *fields: Literal["edition", "episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"]) -> "PlexItemQuery":  # type: ignore[override]
         """Return dicts instead of models."""
         ...
 
-    def values_list(self, *fields: Literal["episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"], flat: bool = False) -> "PlexItemQuery":  # type: ignore[override]
+    def values_list(self, *fields: Literal["edition", "episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"], flat: bool = False) -> "PlexItemQuery":  # type: ignore[override]
         """Return tuples/values instead of models."""
         ...
 
@@ -5641,6 +5663,16 @@ class PlexItemManager(QueryManager[PlexItem]):
     def filter(
         self,
         *args: Any,
+        edition: str | None = None,
+        edition__contains: str | None = None,
+        edition__icontains: str | None = None,
+        edition__startswith: str | None = None,
+        edition__istartswith: str | None = None,
+        edition__endswith: str | None = None,
+        edition__iendswith: str | None = None,
+        edition__iexact: str | None = None,
+        edition__in: list[str] | None = None,
+        edition__isnull: bool | None = None,
         episode_number: int | None = None,
         episode_number__gt: int | None = None,
         episode_number__gte: int | None = None,
@@ -5728,6 +5760,16 @@ class PlexItemManager(QueryManager[PlexItem]):
     def exclude(
         self,
         *args: Any,
+        edition: str | None = None,
+        edition__contains: str | None = None,
+        edition__icontains: str | None = None,
+        edition__startswith: str | None = None,
+        edition__istartswith: str | None = None,
+        edition__endswith: str | None = None,
+        edition__iendswith: str | None = None,
+        edition__iexact: str | None = None,
+        edition__in: list[str] | None = None,
+        edition__isnull: bool | None = None,
         episode_number: int | None = None,
         episode_number__gt: int | None = None,
         episode_number__gte: int | None = None,
@@ -5812,11 +5854,11 @@ class PlexItemManager(QueryManager[PlexItem]):
         """Exclude objects matching field lookups."""
         ...
 
-    def values(self, *fields: Literal["episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"]) -> PlexItemQuery:  # type: ignore[override]
+    def values(self, *fields: Literal["edition", "episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"]) -> PlexItemQuery:  # type: ignore[override]
         """Return dicts instead of models."""
         ...
 
-    def values_list(self, *fields: Literal["episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"], flat: bool = False) -> PlexItemQuery:  # type: ignore[override]
+    def values_list(self, *fields: Literal["edition", "episode_number", "rating_key", "season_number", "show_title", "title", "type", "video", "video_path", "year"], flat: bool = False) -> PlexItemQuery:  # type: ignore[override]
         """Return tuples/values instead of models."""
         ...
 
@@ -5967,6 +6009,7 @@ class PlexItemManager(QueryManager[PlexItem]):
         instance: PlexItem | None = None,
         client: Any | None = None,
         using: str | None = None,
+        edition: str | None = None,
         episode_number: int | None = None,
         rating_key: str | None = None,
         season_number: int | None = None,
@@ -5994,6 +6037,629 @@ class PlexItemManager(QueryManager[PlexItem]):
     async def bulk_update(  # type: ignore[override]
         self,
         objects: list[PlexItem],
+        fields: list[str],
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> int:
+        """Bulk update objects."""
+        ...
+
+
+class PlexPoster(Model):
+    class Meta:
+        is_table: bool
+        table_name: str
+    id: int | None
+    item: PlexItem | None
+    edition: str
+    thumb: str
+    applied_at: datetime
+    item_rating_key: str | None
+    objects: ClassVar["PlexPosterManager"]
+
+
+class PlexPosterQuery(Query[PlexPoster]):
+    """Type-safe Query for PlexPoster model."""
+
+    # Query building methods (sync, return Query)
+
+    def filter(
+        self,
+        *args: Any,
+        applied_at: datetime | None = None,
+        applied_at__gt: datetime | None = None,
+        applied_at__gte: datetime | None = None,
+        applied_at__lt: datetime | None = None,
+        applied_at__lte: datetime | None = None,
+        applied_at__between: tuple[datetime, datetime] | None = None,
+        applied_at__range: datetime | None = None,
+        applied_at__year: int | None = None,
+        applied_at__month: int | None = None,
+        applied_at__day: int | None = None,
+        applied_at__in: list[datetime] | None = None,
+        applied_at__isnull: bool | None = None,
+        edition: str | None = None,
+        edition__contains: str | None = None,
+        edition__icontains: str | None = None,
+        edition__startswith: str | None = None,
+        edition__istartswith: str | None = None,
+        edition__endswith: str | None = None,
+        edition__iendswith: str | None = None,
+        edition__iexact: str | None = None,
+        edition__in: list[str] | None = None,
+        edition__isnull: bool | None = None,
+        id: int | None = None,
+        id__gt: int | None = None,
+        id__gte: int | None = None,
+        id__lt: int | None = None,
+        id__lte: int | None = None,
+        id__between: tuple[int, int] | None = None,
+        id__range: int | None = None,
+        id__in: list[int] | None = None,
+        id__isnull: bool | None = None,
+        item: PlexItem | None = None,
+        item__in: list[PlexItem] | None = None,
+        item__isnull: bool | None = None,
+        item_rating_key: str | None = None,
+        item_rating_key__contains: str | None = None,
+        item_rating_key__icontains: str | None = None,
+        item_rating_key__startswith: str | None = None,
+        item_rating_key__istartswith: str | None = None,
+        item_rating_key__endswith: str | None = None,
+        item_rating_key__iendswith: str | None = None,
+        item_rating_key__iexact: str | None = None,
+        item_rating_key__in: list[str] | None = None,
+        item_rating_key__isnull: bool | None = None,
+        thumb: str | None = None,
+        thumb__contains: str | None = None,
+        thumb__icontains: str | None = None,
+        thumb__startswith: str | None = None,
+        thumb__istartswith: str | None = None,
+        thumb__endswith: str | None = None,
+        thumb__iendswith: str | None = None,
+        thumb__iexact: str | None = None,
+        thumb__in: list[str] | None = None,
+        thumb__isnull: bool | None = None,
+    ) -> "PlexPosterQuery":
+        """Filter by Q-expressions or field lookups."""
+        ...
+
+    def exclude(
+        self,
+        *args: Any,
+        applied_at: datetime | None = None,
+        applied_at__gt: datetime | None = None,
+        applied_at__gte: datetime | None = None,
+        applied_at__lt: datetime | None = None,
+        applied_at__lte: datetime | None = None,
+        applied_at__between: tuple[datetime, datetime] | None = None,
+        applied_at__range: datetime | None = None,
+        applied_at__year: int | None = None,
+        applied_at__month: int | None = None,
+        applied_at__day: int | None = None,
+        applied_at__in: list[datetime] | None = None,
+        applied_at__isnull: bool | None = None,
+        edition: str | None = None,
+        edition__contains: str | None = None,
+        edition__icontains: str | None = None,
+        edition__startswith: str | None = None,
+        edition__istartswith: str | None = None,
+        edition__endswith: str | None = None,
+        edition__iendswith: str | None = None,
+        edition__iexact: str | None = None,
+        edition__in: list[str] | None = None,
+        edition__isnull: bool | None = None,
+        id: int | None = None,
+        id__gt: int | None = None,
+        id__gte: int | None = None,
+        id__lt: int | None = None,
+        id__lte: int | None = None,
+        id__between: tuple[int, int] | None = None,
+        id__range: int | None = None,
+        id__in: list[int] | None = None,
+        id__isnull: bool | None = None,
+        item: PlexItem | None = None,
+        item__in: list[PlexItem] | None = None,
+        item__isnull: bool | None = None,
+        item_rating_key: str | None = None,
+        item_rating_key__contains: str | None = None,
+        item_rating_key__icontains: str | None = None,
+        item_rating_key__startswith: str | None = None,
+        item_rating_key__istartswith: str | None = None,
+        item_rating_key__endswith: str | None = None,
+        item_rating_key__iendswith: str | None = None,
+        item_rating_key__iexact: str | None = None,
+        item_rating_key__in: list[str] | None = None,
+        item_rating_key__isnull: bool | None = None,
+        thumb: str | None = None,
+        thumb__contains: str | None = None,
+        thumb__icontains: str | None = None,
+        thumb__startswith: str | None = None,
+        thumb__istartswith: str | None = None,
+        thumb__endswith: str | None = None,
+        thumb__iendswith: str | None = None,
+        thumb__iexact: str | None = None,
+        thumb__in: list[str] | None = None,
+        thumb__isnull: bool | None = None,
+    ) -> "PlexPosterQuery":
+        """Exclude objects matching field lookups."""
+        ...
+
+    def order_by(self, *fields: Literal["applied_at", "-applied_at", "edition", "-edition", "id", "-id", "item", "-item", "item_rating_key", "-item_rating_key", "thumb", "-thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
+        """Order results by fields."""
+        ...
+
+    def limit(self, n: int) -> "PlexPosterQuery":
+        """Limit number of results."""
+        ...
+
+    def offset(self, n: int) -> "PlexPosterQuery":
+        """Skip first n results."""
+        ...
+
+    def distinct(self, value: bool = True) -> "PlexPosterQuery":
+        """Return distinct results."""
+        ...
+
+    def select(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
+        """Select specific fields."""
+        ...
+
+    def join(self, *paths: str) -> "PlexPosterQuery":
+        """Perform LEFT JOIN for relations."""
+        ...
+
+    def prefetch(self, *paths: str) -> "PlexPosterQuery":
+        """Prefetch related objects (separate queries)."""
+        ...
+
+    def for_update(self) -> "PlexPosterQuery":
+        """Add FOR UPDATE lock to query."""
+        ...
+
+    def for_share(self) -> "PlexPosterQuery":
+        """Add FOR SHARE lock to query."""
+        ...
+
+    def annotate(self, **annotations: Any) -> "PlexPosterQuery":
+        """Add computed fields using aggregate functions."""
+        ...
+
+    def group_by(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
+        """Add GROUP BY clause."""
+        ...
+
+    def having(self, *q_exprs: Any, **kwargs: Any) -> "PlexPosterQuery":
+        """Add HAVING clause for filtering grouped results."""
+        ...
+
+    def values(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
+        """Return dicts instead of models."""
+        ...
+
+    def values_list(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"], flat: bool = False) -> "PlexPosterQuery":  # type: ignore[override]
+        """Return tuples/values instead of models."""
+        ...
+
+    # Terminal methods (async, execute query)
+
+    async def all(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> list[PlexPoster]:
+        """Execute query and return all results."""
+        ...
+
+    async def first(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> PlexPoster | None:
+        """Execute query and return first result."""
+        ...
+
+    async def last(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> PlexPoster | None:
+        """Execute query and return last result."""
+        ...
+
+    async def count(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> int:
+        """Count matching objects."""
+        ...
+
+    async def sum(
+        self,
+        field: str,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> Any:
+        """Calculate sum of field values."""
+        ...
+
+    async def avg(
+        self,
+        field: str,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> Any:
+        """Calculate average of field values."""
+        ...
+
+    async def max(
+        self,
+        field: str,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> Any:
+        """Get maximum field value."""
+        ...
+
+    async def min(
+        self,
+        field: str,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> Any:
+        """Get minimum field value."""
+        ...
+
+    async def update(  # type: ignore[override]
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+        **values: Any,
+    ) -> int:
+        """Update matching objects."""
+        ...
+
+    async def increment(
+        self,
+        field: str,
+        by: int | float = 1,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> int:
+        """Atomically increment a field value."""
+        ...
+
+    async def delete(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> int:
+        """Delete matching objects."""
+        ...
+
+class PlexPosterManager(QueryManager[PlexPoster]):
+    """Type-safe Manager for PlexPoster model."""
+
+    # Query building methods (sync, return Query)
+
+    def query(self) -> PlexPosterQuery:
+        """Return a Query builder for this model."""
+        ...
+
+    def filter(
+        self,
+        *args: Any,
+        applied_at: datetime | None = None,
+        applied_at__gt: datetime | None = None,
+        applied_at__gte: datetime | None = None,
+        applied_at__lt: datetime | None = None,
+        applied_at__lte: datetime | None = None,
+        applied_at__between: tuple[datetime, datetime] | None = None,
+        applied_at__range: datetime | None = None,
+        applied_at__year: int | None = None,
+        applied_at__month: int | None = None,
+        applied_at__day: int | None = None,
+        applied_at__in: list[datetime] | None = None,
+        applied_at__isnull: bool | None = None,
+        edition: str | None = None,
+        edition__contains: str | None = None,
+        edition__icontains: str | None = None,
+        edition__startswith: str | None = None,
+        edition__istartswith: str | None = None,
+        edition__endswith: str | None = None,
+        edition__iendswith: str | None = None,
+        edition__iexact: str | None = None,
+        edition__in: list[str] | None = None,
+        edition__isnull: bool | None = None,
+        id: int | None = None,
+        id__gt: int | None = None,
+        id__gte: int | None = None,
+        id__lt: int | None = None,
+        id__lte: int | None = None,
+        id__between: tuple[int, int] | None = None,
+        id__range: int | None = None,
+        id__in: list[int] | None = None,
+        id__isnull: bool | None = None,
+        item: PlexItem | None = None,
+        item__in: list[PlexItem] | None = None,
+        item__isnull: bool | None = None,
+        item_rating_key: str | None = None,
+        item_rating_key__contains: str | None = None,
+        item_rating_key__icontains: str | None = None,
+        item_rating_key__startswith: str | None = None,
+        item_rating_key__istartswith: str | None = None,
+        item_rating_key__endswith: str | None = None,
+        item_rating_key__iendswith: str | None = None,
+        item_rating_key__iexact: str | None = None,
+        item_rating_key__in: list[str] | None = None,
+        item_rating_key__isnull: bool | None = None,
+        thumb: str | None = None,
+        thumb__contains: str | None = None,
+        thumb__icontains: str | None = None,
+        thumb__startswith: str | None = None,
+        thumb__istartswith: str | None = None,
+        thumb__endswith: str | None = None,
+        thumb__iendswith: str | None = None,
+        thumb__iexact: str | None = None,
+        thumb__in: list[str] | None = None,
+        thumb__isnull: bool | None = None,
+    ) -> PlexPosterQuery:
+        """Filter by Q-expressions or field lookups."""
+        ...
+
+    def exclude(
+        self,
+        *args: Any,
+        applied_at: datetime | None = None,
+        applied_at__gt: datetime | None = None,
+        applied_at__gte: datetime | None = None,
+        applied_at__lt: datetime | None = None,
+        applied_at__lte: datetime | None = None,
+        applied_at__between: tuple[datetime, datetime] | None = None,
+        applied_at__range: datetime | None = None,
+        applied_at__year: int | None = None,
+        applied_at__month: int | None = None,
+        applied_at__day: int | None = None,
+        applied_at__in: list[datetime] | None = None,
+        applied_at__isnull: bool | None = None,
+        edition: str | None = None,
+        edition__contains: str | None = None,
+        edition__icontains: str | None = None,
+        edition__startswith: str | None = None,
+        edition__istartswith: str | None = None,
+        edition__endswith: str | None = None,
+        edition__iendswith: str | None = None,
+        edition__iexact: str | None = None,
+        edition__in: list[str] | None = None,
+        edition__isnull: bool | None = None,
+        id: int | None = None,
+        id__gt: int | None = None,
+        id__gte: int | None = None,
+        id__lt: int | None = None,
+        id__lte: int | None = None,
+        id__between: tuple[int, int] | None = None,
+        id__range: int | None = None,
+        id__in: list[int] | None = None,
+        id__isnull: bool | None = None,
+        item: PlexItem | None = None,
+        item__in: list[PlexItem] | None = None,
+        item__isnull: bool | None = None,
+        item_rating_key: str | None = None,
+        item_rating_key__contains: str | None = None,
+        item_rating_key__icontains: str | None = None,
+        item_rating_key__startswith: str | None = None,
+        item_rating_key__istartswith: str | None = None,
+        item_rating_key__endswith: str | None = None,
+        item_rating_key__iendswith: str | None = None,
+        item_rating_key__iexact: str | None = None,
+        item_rating_key__in: list[str] | None = None,
+        item_rating_key__isnull: bool | None = None,
+        thumb: str | None = None,
+        thumb__contains: str | None = None,
+        thumb__icontains: str | None = None,
+        thumb__startswith: str | None = None,
+        thumb__istartswith: str | None = None,
+        thumb__endswith: str | None = None,
+        thumb__iendswith: str | None = None,
+        thumb__iexact: str | None = None,
+        thumb__in: list[str] | None = None,
+        thumb__isnull: bool | None = None,
+    ) -> PlexPosterQuery:
+        """Exclude objects matching field lookups."""
+        ...
+
+    def values(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"]) -> PlexPosterQuery:  # type: ignore[override]
+        """Return dicts instead of models."""
+        ...
+
+    def values_list(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"], flat: bool = False) -> PlexPosterQuery:  # type: ignore[override]
+        """Return tuples/values instead of models."""
+        ...
+
+    def distinct(self, distinct: bool = True) -> PlexPosterQuery:
+        """Return distinct results."""
+        ...
+
+    def join(self, *paths: str) -> PlexPosterQuery:
+        """Perform LEFT JOIN for relations."""
+        ...
+
+    def prefetch(self, *paths: str) -> PlexPosterQuery:
+        """Prefetch related objects (separate queries)."""
+        ...
+
+    def for_update(self) -> PlexPosterQuery:
+        """Add FOR UPDATE lock to query."""
+        ...
+
+    def for_share(self) -> PlexPosterQuery:
+        """Add FOR SHARE lock to query."""
+        ...
+
+    # Terminal methods (async, execute query)
+
+    async def get(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+        **filters: Any,
+    ) -> PlexPoster:
+        """Get single object matching lookups."""
+        ...
+
+    async def get_or_none(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+        **filters: Any,
+    ) -> PlexPoster | None:
+        """Get object or None if not found."""
+        ...
+
+    async def get_or_create(
+        self,
+        *,
+        defaults: dict[str, Any] | None = None,
+        client: Any | None = None,
+        using: str | None = None,
+        **filters: Any,
+    ) -> tuple[PlexPoster, bool]:
+        """Get object or create if not found. Returns (object, created)."""
+        ...
+
+    async def update_or_create(
+        self,
+        *,
+        defaults: dict[str, Any] | None = None,
+        client: Any | None = None,
+        using: str | None = None,
+        **filters: Any,
+    ) -> tuple[PlexPoster, bool]:
+        """Get object, create if missing, or update it when defaults are provided."""
+        ...
+
+    async def all(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+        mode: str = "models",
+    ) -> list[PlexPoster]:
+        """Get all objects."""
+        ...
+
+    async def first(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> PlexPoster | None:
+        """Get first object."""
+        ...
+
+    async def last(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> PlexPoster | None:
+        """Get last object."""
+        ...
+
+    async def count(
+        self,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> int:
+        """Count all objects."""
+        ...
+
+    async def sum(
+        self,
+        field: str,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> Any:
+        """Calculate sum of field values."""
+        ...
+
+    async def avg(
+        self,
+        field: str,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> Any:
+        """Calculate average of field values."""
+        ...
+
+    async def max(
+        self,
+        field: str,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> Any:
+        """Get maximum field value."""
+        ...
+
+    async def min(
+        self,
+        field: str,
+        *,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> Any:
+        """Get minimum field value."""
+        ...
+
+    async def create(  # type: ignore[override]
+        self,
+        *,
+        instance: PlexPoster | None = None,
+        client: Any | None = None,
+        using: str | None = None,
+        applied_at: datetime | None = None,
+        edition: str | None = None,
+        id: int | None = None,
+        item: PlexItem | None = None,
+        item_rating_key: str | None = None,
+        thumb: str | None = None,
+    ) -> PlexPoster:
+        """Create new object."""
+        ...
+
+    async def bulk_create(  # type: ignore[override]
+        self,
+        objects: list[PlexPoster],
+        *,
+        batch_size: int | None = None,
+        client: Any | None = None,
+        using: str | None = None,
+    ) -> list[PlexPoster]:
+        """Bulk create objects."""
+        ...
+
+    async def bulk_update(  # type: ignore[override]
+        self,
+        objects: list[PlexPoster],
         fields: list[str],
         *,
         client: Any | None = None,

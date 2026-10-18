@@ -5,9 +5,9 @@ import os
 import shutil
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 from ruamel.yaml import YAML
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,29 @@ class StripNonesModel(BaseModel):
         return data
 
 
+# "#RRGGBB" or "#RRGGBBAA".
+HexColor = Annotated[
+    str, StringConstraints(pattern=r"^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$")
+]
+
+
+class PosterStyleConfig(StripNonesModel):
+    """Kometa overlay keys; pixel values are on a 1000x1500 reference canvas."""
+
+    text: str = "<<edition>>"
+    font: str = "Inter-Bold.ttf"
+    font_size: int = Field(default=60, gt=0)
+    font_color: HexColor = "#FFFFFF"
+    back_color: HexColor = "#00000099"
+    back_width: int = Field(default=1000, gt=0)
+    back_height: int = Field(default=100, gt=0)
+    back_radius: int = Field(default=0, ge=0)
+    horizontal_align: Literal["left", "center", "right"] = "center"
+    horizontal_offset: int = 0
+    vertical_align: Literal["top", "center", "bottom"] = "bottom"
+    vertical_offset: int = 0
+
+
 class PlexConfig(StripNonesModel):
     # Overrides the URL used in deep-links. Without this, usharr uses
     # the URL it auto-discovered during `usharr auth`, which is often
@@ -43,6 +66,8 @@ class PlexConfig(StripNonesModel):
     # {local_prefix: remote_prefix} — rewrite Plex-reported paths so
     # they match usharr's mounts before suffix matching runs.
     path_map: dict[str, str] = Field(default_factory=dict)
+    # Present (even as an empty mapping) turns edition stamping on.
+    posters: PosterStyleConfig | None = None
 
 
 class TautulliConfig(StripNonesModel):

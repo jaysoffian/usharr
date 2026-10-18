@@ -23,6 +23,7 @@ Oxyde caveats baked into these definitions:
 """
 
 import json
+from datetime import datetime
 from typing import ClassVar
 
 from oxyde import Field, Index, Model
@@ -190,6 +191,7 @@ class PlexItem(Model):
     show_title: str | None = Field(default=None, db_type="TEXT")
     season_number: int | None = None
     episode_number: int | None = None
+    edition: str | None = Field(default=None, db_type="TEXT")
     # Only resolved items are stored, so the local file link is NOT NULL.
     video: VideoFile | None = Field(
         default=None, db_on_delete="CASCADE", db_nullable=False
@@ -200,6 +202,26 @@ class PlexItem(Model):
         table_name = "plex_item"
         indexes: ClassVar[list[Index]] = [
             Index(("video_path",), name="plex_item_video_idx")
+        ]
+
+
+class PlexPoster(Model):
+    """The poster usharr last stamped for a Plex movie, so an unchanged
+    poster is skipped without downloading it."""
+
+    id: int | None = Field(default=None, db_pk=True)
+    item: PlexItem | None = Field(
+        default=None, db_on_delete="CASCADE", db_nullable=False
+    )
+    edition: str = Field(db_type="TEXT")
+    thumb: str = Field(db_type="TEXT")
+    applied_at: datetime
+
+    class Meta:
+        is_table = True
+        table_name = "plex_poster"
+        indexes: ClassVar[list[Index]] = [
+            Index(("item_rating_key",), unique=True, name="plex_poster_item_uq")
         ]
 
 

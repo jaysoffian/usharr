@@ -49,6 +49,7 @@ class LibMetadata(Model):
     grandparent_title: str | None = Field(default=None, alias="grandparentTitle")
     parent_index: int | None = Field(default=None, alias="parentIndex")
     index: int | None = None
+    edition_title: str | None = Field(default=None, alias="editionTitle")
     media: list[LibMedia] = Field(default_factory=list, alias="Media")
 
     async def upsert(self, path_map: dict[str, str], known: set[str]) -> None:
@@ -67,6 +68,7 @@ class LibMetadata(Model):
             show_title=self.grandparent_title,
             season_number=self.parent_index,
             episode_number=self.index,
+            edition=self.edition_title or None,
             local_path=local_path,
         )
 

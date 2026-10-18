@@ -89,6 +89,7 @@ class Media(PlexModel):
 
 
 class Metadata(PlexModel):
+    thumb: str = ""
     media: list[Media] = Field(default_factory=list, alias="Media")
 
 

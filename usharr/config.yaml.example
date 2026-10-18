@@ -27,6 +27,30 @@ library:
 #     "/media/Documentaries": /some/where/else/Documentaries
 #     "/media/Movies": /some/where/else/Movies
 #     "/media/TV Shows": /some/where/else/TV Shows
+#
+# Optional: add movie edition name to its Plex poster. Enable this feature with
+# a `posters` block. Use an empty dictionary to accept all defaults:
+#
+#   posters: {}
+#
+# Configure as follows (the following are the defaults):
+#
+#   posters:
+#     text: "<<edition>>"         # <<edition>>, <<editionU>>, <<editionL>>, <<editionP>>
+#     font: Inter-Bold.ttf        # bundled name or an absolute path
+#     font_size: 60
+#     font_color: "#FFFFFF"
+#     back_color: "#00000099"
+#     back_width: 1000
+#     back_height: 100
+#     back_radius: 0
+#     horizontal_align: center
+#     horizontal_offset: 0
+#     vertical_align: bottom
+#     vertical_offset: 0
+#
+# Sizes and offset values above are pixels against a 1000x1500 canonical
+# poster size, scaled to each real poster's size.
 
 ###############################################################################
 # Enable Tautulli integration (optional)

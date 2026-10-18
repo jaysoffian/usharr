@@ -13,6 +13,7 @@ its external tracks.
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -25,6 +26,7 @@ from usharr.models import (
     Mediainfo,
     Movie,
     PlexItem,
+    PlexPoster,
     Series,
     SubtitleFile,
     SubtitleTrackExternal,
@@ -496,6 +498,7 @@ async def upsert_plex_item(
     show_title: str | None = None,
     season_number: int | None = None,
     episode_number: int | None = None,
+    edition: str | None = None,
 ) -> None:
     await PlexItem.objects.update_or_create(
         rating_key=rating_key,
@@ -506,6 +509,7 @@ async def upsert_plex_item(
             "show_title": show_title,
             "season_number": season_number,
             "episode_number": episode_number,
+            "edition": edition,
             "video_path": local_path,
         },
     )
@@ -529,6 +533,30 @@ async def list_plex_rating_keys() -> set[str]:
 
 async def delete_plex_rating_keys(keys: list[str]) -> int:
     return await chunked_delete(PlexItem, "rating_key", keys)
+
+
+async def list_movies_with_edition() -> list[PlexItem]:
+    rows = await PlexItem.objects.filter(type="movie", edition__isnull=False).all()
+    return [row for row in rows if row.edition]
+
+
+# --- plex_poster ----------------------------------------------------------
+
+
+async def plex_posters_by_rating_key() -> dict[str, PlexPoster]:
+    rows = await PlexPoster.objects.all()
+    return {row.item_rating_key: row for row in rows if row.item_rating_key}
+
+
+async def upsert_plex_poster(*, rating_key: str, edition: str, thumb: str) -> None:
+    await PlexPoster.objects.update_or_create(
+        item_rating_key=rating_key,
+        defaults={
+            "edition": edition,
+            "thumb": thumb,
+            "applied_at": datetime.now(UTC),
+        },
+    )
 
 
 # --- radarr (Movie overlay) -----------------------------------------------

@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import NamedTuple
 
 from usharr import format as fmt
-from usharr import plex_sync, queries, radarr_sync, sonarr_sync, subtitles
+from usharr import (
+    plex_posters,
+    plex_sync,
+    queries,
+    radarr_sync,
+    sonarr_sync,
+    subtitles,
+)
 from usharr.config import get_config
 from usharr.probers import AspectRatioProber, MediainfoProber
 
@@ -221,6 +228,8 @@ class Scanner:
             radarr_sync.sync(),
             sonarr_sync.sync(),
         )
+        # Reads the plex_item rows the Plex sync just wrote.
+        await plex_posters.sync()
         logger.info("sync completed in %.1fs", time.monotonic() - start)
 
 
