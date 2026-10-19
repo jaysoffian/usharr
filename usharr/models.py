@@ -215,6 +215,8 @@ class PlexPoster(Model):
     )
     edition: str = Field(db_type="TEXT")
     thumb: str = Field(db_type="TEXT")
+    # Fingerprint of the PosterStyleConfig the stamp was rendered with.
+    style: str | None = Field(default=None, db_type="TEXT")
     applied_at: datetime
 
     class Meta:

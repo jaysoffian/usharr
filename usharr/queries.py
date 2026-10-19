@@ -548,12 +548,15 @@ async def plex_posters_by_rating_key() -> dict[str, PlexPoster]:
     return {row.item_rating_key: row for row in rows if row.item_rating_key}
 
 
-async def upsert_plex_poster(*, rating_key: str, edition: str, thumb: str) -> None:
+async def upsert_plex_poster(
+    *, rating_key: str, edition: str, thumb: str, style: str | None
+) -> None:
     await PlexPoster.objects.update_or_create(
         item_rating_key=rating_key,
         defaults={
             "edition": edition,
             "thumb": thumb,
+            "style": style,
             "applied_at": datetime.now(UTC),
         },
     )

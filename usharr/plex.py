@@ -101,6 +101,19 @@ class PlexMetadataResponse(PlexModel):
     container: MediaContainer = Field(alias="MediaContainer")
 
 
+class PosterCandidate(PlexModel):
+    rating_key: str = Field(default="", alias="ratingKey")
+    key: str = ""
+
+
+class PosterCandidates(PlexModel):
+    metadata: list[PosterCandidate] = Field(default_factory=list, alias="Metadata")
+
+
+class PlexPostersResponse(PlexModel):
+    container: PosterCandidates = Field(alias="MediaContainer")
+
+
 class PlexWebhookPayload(PlexModel):
     event: str
 
