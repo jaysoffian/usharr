@@ -1,5 +1,6 @@
 """Stamp the edition name onto the Plex poster of every movie that has one."""
 
+import hashlib
 import io
 import logging
 import string
@@ -161,14 +162,40 @@ class Server:
             raise plex.PlexError(msg)
         return resp.container.metadata[0].thumb
 
-    async def poster(self, thumb: str) -> bytes:
+    async def poster(self, thumb: str) -> bytes | None:
+        """The current poster's bytes, or None when Plex no longer serves it."""
         r = await http.client().get(
             f"{self.url}{thumb}", headers=self.headers, timeout=60.0
         )
+        if r.status_code == 404:
+            return None
         if r.status_code != 200:
             msg = f"GET {thumb} → {r.status_code}"
             raise plex.PlexError(msg)
         return r.content
+
+    async def first_candidate(self, item: PlexItem) -> tuple[str, bytes]:
+        """Plex's first downloadable provider poster for an item."""
+        endpoint = f"{self.url}/library/metadata/{item.rating_key}/posters"
+        r = await http.client().get(endpoint, headers=self.headers, timeout=30.0)
+        if r.status_code != 200:
+            msg = f"GET {endpoint} → {r.status_code}"
+            raise plex.PlexError(msg)
+        listing = plex.parse(plex.PlexPostersResponse, r.content, f"GET {endpoint}")
+        for candidate in listing.container.metadata:
+            if candidate.rating_key.startswith("upload://"):
+                continue
+            if candidate.key.startswith("/"):
+                r = await http.client().get(
+                    f"{self.url}{candidate.key}", headers=self.headers, timeout=30.0
+                )
+            else:
+                # An external image host never gets the Plex token.
+                r = await http.client().get(candidate.key, timeout=30.0)
+            if r.status_code == 200:
+                return candidate.rating_key, r.content
+        msg = "no usable poster candidate; select a poster in Plex"
+        raise plex.PlexError(msg)
 
     async def upload_poster(self, rating_key: str, jpeg: bytes) -> None:
         endpoint = f"{self.url}/library/metadata/{rating_key}/posters"
@@ -186,27 +213,45 @@ class Server:
 # --- the pass -------------------------------------------------------------
 
 
+def style_fingerprint(style: PosterStyleConfig) -> str:
+    return hashlib.sha256(style.model_dump_json().encode()).hexdigest()[:16]
+
+
 async def stamp(
     server: Server, item: PlexItem, row: PlexPoster | None, style: PosterStyleConfig
 ) -> bool:
-    """Stamp one movie's poster unless it already carries this edition.
-
-    Returns whether a new poster was uploaded.
-    """
+    """Stamp one movie's poster unless it already carries this edition and style."""
     edition = item.edition or ""
+    fingerprint = style_fingerprint(style)
+    # No row (a rebuilt DB) is taken as stamped with the current style.
+    same_style = row is None or row.style == fingerprint
     thumb = await server.thumb(item.rating_key)
-    if row is not None and row.edition == edition and row.thumb == thumb:
+    if row is not None and row.edition == edition and row.thumb == thumb and same_style:
         return False
     poster = await server.poster(thumb)
-    uploaded = stamped_edition(poster) != edition
-    if uploaded:
-        await server.upload_poster(item.rating_key, render(poster, edition, style))
-        thumb = await server.thumb(item.rating_key)
-        logger.info("plex_posters: stamped %s (%s)", item.title, item.rating_key)
+    marked = stamped_edition(poster) if poster is not None else None
+    if poster is not None and marked == edition and same_style:
+        await queries.upsert_plex_poster(
+            rating_key=item.rating_key, edition=edition, thumb=thumb, style=fingerprint
+        )
+        return False
+    if poster is not None and marked is None:
+        base = poster
+    else:
+        rating_key, base = await server.first_candidate(item)
+        logger.info(
+            "plex_posters: %s (%s): stamped Plex's first candidate %s",
+            item.title,
+            item.rating_key,
+            rating_key,
+        )
+    await server.upload_poster(item.rating_key, render(base, edition, style))
+    thumb = await server.thumb(item.rating_key)
+    logger.info("plex_posters: stamped %s (%s)", item.title, item.rating_key)
     await queries.upsert_plex_poster(
-        rating_key=item.rating_key, edition=edition, thumb=thumb
+        rating_key=item.rating_key, edition=edition, thumb=thumb, style=fingerprint
     )
-    return uploaded
+    return True
 
 
 async def sync() -> None:

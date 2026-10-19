@@ -6054,6 +6054,7 @@ class PlexPoster(Model):
     item: PlexItem | None
     edition: str
     thumb: str
+    style: str | None
     applied_at: datetime
     item_rating_key: str | None
     objects: ClassVar["PlexPosterManager"]
@@ -6111,6 +6112,16 @@ class PlexPosterQuery(Query[PlexPoster]):
         item_rating_key__iexact: str | None = None,
         item_rating_key__in: list[str] | None = None,
         item_rating_key__isnull: bool | None = None,
+        style: str | None = None,
+        style__contains: str | None = None,
+        style__icontains: str | None = None,
+        style__startswith: str | None = None,
+        style__istartswith: str | None = None,
+        style__endswith: str | None = None,
+        style__iendswith: str | None = None,
+        style__iexact: str | None = None,
+        style__in: list[str] | None = None,
+        style__isnull: bool | None = None,
         thumb: str | None = None,
         thumb__contains: str | None = None,
         thumb__icontains: str | None = None,
@@ -6172,6 +6183,16 @@ class PlexPosterQuery(Query[PlexPoster]):
         item_rating_key__iexact: str | None = None,
         item_rating_key__in: list[str] | None = None,
         item_rating_key__isnull: bool | None = None,
+        style: str | None = None,
+        style__contains: str | None = None,
+        style__icontains: str | None = None,
+        style__startswith: str | None = None,
+        style__istartswith: str | None = None,
+        style__endswith: str | None = None,
+        style__iendswith: str | None = None,
+        style__iexact: str | None = None,
+        style__in: list[str] | None = None,
+        style__isnull: bool | None = None,
         thumb: str | None = None,
         thumb__contains: str | None = None,
         thumb__icontains: str | None = None,
@@ -6186,7 +6207,7 @@ class PlexPosterQuery(Query[PlexPoster]):
         """Exclude objects matching field lookups."""
         ...
 
-    def order_by(self, *fields: Literal["applied_at", "-applied_at", "edition", "-edition", "id", "-id", "item", "-item", "item_rating_key", "-item_rating_key", "thumb", "-thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
+    def order_by(self, *fields: Literal["applied_at", "-applied_at", "edition", "-edition", "id", "-id", "item", "-item", "item_rating_key", "-item_rating_key", "style", "-style", "thumb", "-thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
         """Order results by fields."""
         ...
 
@@ -6202,7 +6223,7 @@ class PlexPosterQuery(Query[PlexPoster]):
         """Return distinct results."""
         ...
 
-    def select(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
+    def select(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "style", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
         """Select specific fields."""
         ...
 
@@ -6226,7 +6247,7 @@ class PlexPosterQuery(Query[PlexPoster]):
         """Add computed fields using aggregate functions."""
         ...
 
-    def group_by(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
+    def group_by(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "style", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
         """Add GROUP BY clause."""
         ...
 
@@ -6234,11 +6255,11 @@ class PlexPosterQuery(Query[PlexPoster]):
         """Add HAVING clause for filtering grouped results."""
         ...
 
-    def values(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
+    def values(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "style", "thumb"]) -> "PlexPosterQuery":  # type: ignore[override]
         """Return dicts instead of models."""
         ...
 
-    def values_list(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"], flat: bool = False) -> "PlexPosterQuery":  # type: ignore[override]
+    def values_list(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "style", "thumb"], flat: bool = False) -> "PlexPosterQuery":  # type: ignore[override]
         """Return tuples/values instead of models."""
         ...
 
@@ -6406,6 +6427,16 @@ class PlexPosterManager(QueryManager[PlexPoster]):
         item_rating_key__iexact: str | None = None,
         item_rating_key__in: list[str] | None = None,
         item_rating_key__isnull: bool | None = None,
+        style: str | None = None,
+        style__contains: str | None = None,
+        style__icontains: str | None = None,
+        style__startswith: str | None = None,
+        style__istartswith: str | None = None,
+        style__endswith: str | None = None,
+        style__iendswith: str | None = None,
+        style__iexact: str | None = None,
+        style__in: list[str] | None = None,
+        style__isnull: bool | None = None,
         thumb: str | None = None,
         thumb__contains: str | None = None,
         thumb__icontains: str | None = None,
@@ -6467,6 +6498,16 @@ class PlexPosterManager(QueryManager[PlexPoster]):
         item_rating_key__iexact: str | None = None,
         item_rating_key__in: list[str] | None = None,
         item_rating_key__isnull: bool | None = None,
+        style: str | None = None,
+        style__contains: str | None = None,
+        style__icontains: str | None = None,
+        style__startswith: str | None = None,
+        style__istartswith: str | None = None,
+        style__endswith: str | None = None,
+        style__iendswith: str | None = None,
+        style__iexact: str | None = None,
+        style__in: list[str] | None = None,
+        style__isnull: bool | None = None,
         thumb: str | None = None,
         thumb__contains: str | None = None,
         thumb__icontains: str | None = None,
@@ -6481,11 +6522,11 @@ class PlexPosterManager(QueryManager[PlexPoster]):
         """Exclude objects matching field lookups."""
         ...
 
-    def values(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"]) -> PlexPosterQuery:  # type: ignore[override]
+    def values(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "style", "thumb"]) -> PlexPosterQuery:  # type: ignore[override]
         """Return dicts instead of models."""
         ...
 
-    def values_list(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "thumb"], flat: bool = False) -> PlexPosterQuery:  # type: ignore[override]
+    def values_list(self, *fields: Literal["applied_at", "edition", "id", "item", "item_rating_key", "style", "thumb"], flat: bool = False) -> PlexPosterQuery:  # type: ignore[override]
         """Return tuples/values instead of models."""
         ...
 
@@ -6641,6 +6682,7 @@ class PlexPosterManager(QueryManager[PlexPoster]):
         id: int | None = None,
         item: PlexItem | None = None,
         item_rating_key: str | None = None,
+        style: str | None = None,
         thumb: str | None = None,
     ) -> PlexPoster:
         """Create new object."""
