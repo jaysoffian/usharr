@@ -1,12 +1,14 @@
+IMAGE := ghcr.io/jaysoffian/usharr:latest
+
 .PHONY: build
 build:
 	podman build --platform linux/amd64 \
 		--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) \
-		-t usharr:latest .
+		-t $(IMAGE) .
 
 .PHONY: image
 image: build
-	podman save -o usharr.tar usharr:latest
+	podman save -o usharr.tar $(IMAGE)
 
 .PHONY: serve
 serve: config.yaml
