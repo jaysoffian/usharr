@@ -3,7 +3,7 @@
 import logging
 import os
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from functools import cache
@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await database.connect()
     get_config()
     # USHARR_DB_RO: serve the DB read-only without spawning the reconcile

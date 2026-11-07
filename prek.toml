@@ -24,7 +24,7 @@ hooks = [
 
 [[repos]]
 repo = "https://github.com/astral-sh/ruff-pre-commit"
-rev = "v0.15.15"
+rev = "v0.17.4"
 hooks = [
   {
     id = "ruff",
@@ -51,14 +51,14 @@ hooks = [
 
 [[repos]]
 repo = "https://github.com/RobertCraigie/pyright-python"
-rev = "v1.1.410"
+rev = "v1.1.414"
 hooks = [
   { id = "pyright" }
 ]
 
 [[repos]]
 repo = "https://github.com/AleksaC/hadolint-py"
-rev = "v2.14.0"
+rev = "v2.15.1"
 hooks = [
   {
     id = "hadolint",

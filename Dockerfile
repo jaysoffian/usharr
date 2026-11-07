@@ -15,7 +15,7 @@ RUN if [ -f uv.lock ]; then \
         uv sync --no-dev --no-install-project; \
     fi
 
-FROM jlesage/mediainfo:v26.05.1 AS mediainfo
+FROM jlesage/mediainfo:v26.10.1 AS mediainfo
 RUN mkdir -p /out/usr/bin /out/usr/lib \
     && cp -a /usr/bin/mediainfo /out/usr/bin/ \
     && cp -a /usr/lib/libmediainfo.so* /out/usr/lib/ \

@@ -118,7 +118,7 @@ def subtitle_file_exts(media_path: str, subs: list[SubtitleTrack]) -> list[str]:
     """
     paths = [media_path]
     paths.extend(sp for t in subs if (sp := getattr(t, "subtitle_path", None)))
-    cp = os.path.commonprefix(paths)
+    cp = os.path.commonprefix(paths)  # noqa: RUF071 -- character-wise on purpose
     dot = cp.rfind(".")
     if dot != -1:
         base = cp[:dot]
