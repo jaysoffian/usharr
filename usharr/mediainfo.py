@@ -85,6 +85,29 @@ def run_mediainfo(path: Path, *options: str) -> bytes:
     ).stdout
 
 
+async def text_report(path: Path) -> str:
+    out = await asyncio.to_thread(run_mediainfo, path)
+    # mediainfo exits 0 and prints a bare newline when it can't open the file.
+    if not out.strip():
+        raise OSError(f"mediainfo could not read {path}")
+    return out.decode(errors="replace")
+
+
+def parse_text_report(report: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Split a mediainfo text report into (section title, [(key, value)]) pairs."""
+    sections: list[tuple[str, list[tuple[str, str]]]] = []
+    for line in report.splitlines():
+        if not line.strip():
+            continue
+        # Menu keys are timestamps like 00:09:22.353, so split on " : " only.
+        key, sep, value = line.partition(" : ")
+        if sep:
+            sections[-1][1].append((key.rstrip(), value))
+        else:
+            sections.append((line.strip(), []))
+    return sections
+
+
 class General(BaseModel):
     format: str | None = Field(default=None, alias="Format")
     duration: float | None = Field(default=None, alias="Duration")

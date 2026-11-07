@@ -1,8 +1,10 @@
 """FastAPI app: HTML pages + background scan loop."""
 
+import asyncio
 import logging
 import os
 import re
+import subprocess
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
@@ -17,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from oxyde_admin import FastAPIAdmin
 
-from usharr import database, http, plex, queries, views
+from usharr import database, http, mediainfo, plex, queries, views
 from usharr import format as fmt
 from usharr.api import api
 from usharr.config import get_config
@@ -254,48 +256,46 @@ async def detail_nav(lib: Library | None, path: str) -> DetailNav:
     )
 
 
-async def gather_extras(path: str) -> list[dict]:
+async def extra_paths(path: str) -> list[str]:
     """Bonus features: siblings of the main movie that live in an Extras/
-    Interviews/Featurettes/... subfolder. Skip when viewing an extra
-    directly — no nested grouping."""
+    Interviews/Featurettes/... subfolder. None when ``path`` is itself an
+    extra — no nested grouping."""
+    if queries.is_extra(path):
+        return []
+    parent_prefix = str(Path(path).parent) + "/"
+    return [p for p in await queries.paths_under(parent_prefix) if queries.is_extra(p)]
+
+
+async def gather_extras(path: str) -> list[dict]:
     extras: list[dict] = []
-    if not queries.is_extra(path):
-        parent_prefix = str(Path(path).parent) + "/"
-        extra_paths = [
-            p for p in await queries.paths_under(parent_prefix) if queries.is_extra(p)
-        ]
-        for ep in extra_paths:
-            pm = await queries.load_path_media(ep)
-            if pm is None:
-                continue
-            extras.append(
-                {
-                    "mf": pm.mf,
-                    "mi": pm.mediainfo,
-                    "ar": pm.aspect_ratio,
-                    "audio": pm.audio,
-                    "subtitle": pm.subtitles,
-                    "sub_exts": fmt.subtitle_file_exts(ep, pm.subtitles),
-                    "aspect_set": pm.aspect_ratio.aspect_samples_parsed
-                    if pm.aspect_ratio
-                    else None,
-                    "duration_str": fmt.format_duration(
-                        pm.mediainfo.duration if pm.mediainfo else None
-                    ),
-                    "display_title": fmt.format_display_title(ep, None, None),
-                    "year": fmt.year_from_path(ep),
-                    "edition": fmt.edition_from_path(ep),
-                },
-            )
+    for ep in await extra_paths(path):
+        pm = await queries.load_path_media(ep)
+        if pm is None:
+            continue
+        extras.append(
+            {
+                "mf": pm.mf,
+                "mi": pm.mediainfo,
+                "ar": pm.aspect_ratio,
+                "audio": pm.audio,
+                "subtitle": pm.subtitles,
+                "sub_exts": fmt.subtitle_file_exts(ep, pm.subtitles),
+                "aspect_set": pm.aspect_ratio.aspect_samples_parsed
+                if pm.aspect_ratio
+                else None,
+                "duration_str": fmt.format_duration(
+                    pm.mediainfo.duration if pm.mediainfo else None
+                ),
+                "display_title": fmt.format_display_title(ep, None, None),
+                "year": fmt.year_from_path(ep),
+                "edition": fmt.edition_from_path(ep),
+            },
+        )
     return extras
 
 
-@app.get("/item", response_class=HTMLResponse, include_in_schema=False)
-async def item_detail(request: Request, path: str) -> HTMLResponse:
-    pm = await queries.load_path_media(path)
-    if pm is None:
-        raise HTTPException(status_code=404, detail=f"no record for {path}")
-    lib = next(
+def library_for(path: str) -> Library | None:
+    return next(
         (
             lib
             for lib in libraries()
@@ -303,6 +303,14 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
         ),
         None,
     )
+
+
+@app.get("/item", response_class=HTMLResponse, include_in_schema=False)
+async def item_detail(request: Request, path: str) -> HTMLResponse:
+    pm = await queries.load_path_media(path)
+    if pm is None:
+        raise HTTPException(status_code=404, detail=f"no record for {path}")
+    lib = library_for(path)
     nav = await detail_nav(lib, path)
 
     mf = pm.mf
@@ -351,6 +359,53 @@ async def item_detail(request: Request, path: str) -> HTMLResponse:
             "library_label": lib.label if lib else "Library",
             **asdict(nav),
             "mi_badges": fmt.mediainfo_badges(mi, audio_rows),
+        },
+    )
+
+
+async def mediainfo_report(path: str) -> dict:
+    sections = error = None
+    try:
+        sections = mediainfo.parse_text_report(await mediainfo.text_report(Path(path)))
+    except subprocess.CalledProcessError as e:
+        error = f"mediainfo exited with status {e.returncode}\n{e.stderr.decode(errors='replace')}"
+    except subprocess.TimeoutExpired:
+        error = f"mediainfo timed out after {mediainfo.MEDIAINFO_TIMEOUT} s"
+    except OSError as e:
+        error = str(e)
+    return {
+        "path": path,
+        "sections": sections,
+        "error": error,
+        "display_title": fmt.format_display_title(path, None, None),
+        "year": fmt.year_from_path(path),
+        "edition": fmt.edition_from_path(path),
+    }
+
+
+@app.get("/item/mediainfo", response_class=HTMLResponse, include_in_schema=False)
+async def item_mediainfo(request: Request, path: str) -> HTMLResponse:
+    mf = await queries.get(path)
+    if mf is None:
+        raise HTTPException(status_code=404, detail=f"no record for {path}")
+    paths = [mf.path, *await extra_paths(mf.path)]
+    report, *extras = await asyncio.gather(*map(mediainfo_report, paths))
+    plex_item = await queries.get_plex_item_by_local_path(mf.path)
+    lib = library_for(mf.path)
+    return templates.TemplateResponse(
+        request,
+        "mediainfo.html",
+        {
+            "mf": mf,
+            "report": report,
+            "extras": extras,
+            "display_title": fmt.format_display_title(
+                mf.path,
+                plex_item.title if plex_item else None,
+                plex_item.show_title if plex_item else None,
+            ),
+            "libraries": libraries(),
+            "current_slug": lib.slug if lib else "",
         },
     )
 

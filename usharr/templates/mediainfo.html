@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ display_title }} mediainfo — usharr{% endblock %}
+
+{% macro report_table(r) %}
+{% if r.error %}
+<pre class="err">{{ r.error }}</pre>
+{% else %}
+<table class="mediainfo">
+{% for title, rows in r.sections %}
+{% if not loop.first %}<tbody class="gap"><tr><td colspan="2"></td></tr></tbody>{% endif %}
+<tbody>
+  <tr class="section"><th colspan="2"><h3>{{ title }}</h3></th></tr>
+  {% for key, value in rows %}<tr><th>{{ key }}</th><td>{{ value }}</td></tr>
+  {% endfor %}
+</tbody>
+{% endfor %}
+</table>
+{% endif %}
+{% endmacro %}
+
+{% block content %}
+<header class="detail-head mediainfo-head">
+  <div class="title-line">
+    <h1><a href="/item?path={{ mf.path|urlencode }}">{{ display_title }}</a></h1>
+  </div>
+  <div class="path"><code>{{ mf.path }}</code></div>
+</header>
+{{ report_table(report) }}
+
+{% for e in extras %}
+<hr class="extra-sep">
+<header class="extra-head">
+  <h2>{{ e.display_title }}{% if e.edition %} <span class="edition">{{ e.edition }}</span>{% endif %}{% if e.year %} <span class="year">({{ e.year }})</span>{% endif %}</h2>
+  <div class="path"><code>{{ e.path }}</code></div>
+</header>
+{{ report_table(e) }}
+{% endfor %}
+{% endblock %}
