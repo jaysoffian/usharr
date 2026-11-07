@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ display_title }} mediainfo — usharr{% endblock %}
 
+{% block topbar_left %}
+<div class="topbar-title"><span class="svc svc-mediainfo" aria-hidden="true"></span>MediaInfo</div>
+{% endblock %}
+
 {% macro report_table(r) %}
 {% if r.error %}
 <pre class="err">{{ r.error }}</pre>
@@ -21,7 +25,7 @@
 {% block content %}
 <header class="detail-head mediainfo-head">
   <div class="title-line">
-    <h1><a href="/item?path={{ mf.path|urlencode }}">{{ display_title }}</a></h1>
+    <h1>{{ display_title }}</h1>
   </div>
   <div class="path"><code>{{ mf.path }}</code></div>
 </header>

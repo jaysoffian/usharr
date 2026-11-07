@@ -17,6 +17,7 @@
 </head>
 <body>
 <nav class="topbar">
+  {% block topbar_left %}
   <div class="menu menu-left">
     <button class="brand menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Library actions"><span class="brand-icon" aria-hidden="true"></span></button>
     <ul class="menu-items" hidden>
@@ -34,6 +35,7 @@
       </li>
     {% endfor %}
   </ul>
+  {% endblock %}
   <div class="spacer"></div>
   <button id="theme-toggle" class="icon-btn" aria-label="Theme"></button>
 </nav>

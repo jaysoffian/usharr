@@ -113,6 +113,14 @@ code {
   background-repeat: no-repeat;
   background-position: center;
 }
+.topbar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  font-weight: 600;
+}
+.topbar-title .svc { width: 24px; height: 24px; margin: 0; }
 .topbar ul.tabs {
   list-style: none;
   margin: 0;

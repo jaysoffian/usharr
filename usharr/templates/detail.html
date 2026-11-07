@@ -154,7 +154,7 @@
   {% if next_path %}<a class="btn" href="/item?path={{ next_path|urlencode }}">Next ▶</a>{% else %}<span class="btn disabled">Next ▶</span>{% endif %}
   {% endif %}
   <div class="svc-group">
-    <a class="svc svc-mediainfo" href="/item/mediainfo?path={{ mf.path|urlencode }}" title="MediaInfo"></a>
+    <a class="svc svc-mediainfo" href="/item/mediainfo?path={{ mf.path|urlencode }}" target="_blank" rel="noopener" title="MediaInfo"></a>
     {% if plex_url %}<a class="svc svc-plex" href="{{ plex_url }}" target="_blank" rel="noopener" title="Plex"></a>{% endif %}
     {% if tautulli_url %}<a class="svc svc-tautulli" href="{{ tautulli_url }}" target="_blank" rel="noopener" title="Tautulli"></a>{% endif %}
     {% if bazarr_url %}<a class="svc svc-bazarr" href="{{ bazarr_url }}" target="_blank" rel="noopener" title="Bazarr"></a>{% endif %}
