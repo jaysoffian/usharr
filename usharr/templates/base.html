@@ -89,6 +89,12 @@
     const btn = items.closest('.menu').querySelector('.menu-btn');
     if (btn) btn.setAttribute('aria-expanded', String(open));
   }
+  // Focus returns to the menu button so it doesn't fall to <body> when
+  // the focused item hides, or when a dialog opened from it closes.
+  function dismissMenu(items) {
+    setMenuOpen(items, false);
+    items.closest('.menu').querySelector('.menu-btn').focus();
+  }
   function closeAllBut(keep) {
     menus.forEach(m => {
       const items = m.querySelector('.menu-items');
@@ -109,8 +115,7 @@
     if (e.key !== 'Escape') return;
     const open = document.querySelector('.menu-items:not([hidden])');
     if (!open) return;
-    setMenuOpen(open, false);
-    open.closest('.menu').querySelector('.menu-btn').focus();
+    dismissMenu(open);
   });
   document.addEventListener('focusin', function(e) {
     menus.forEach(m => {
@@ -162,7 +167,7 @@
       // confirm dialog.
       flashItem(t, () => {
         const m = t.closest('.menu-items');
-        if (m) setMenuOpen(m, false);
+        if (m) dismissMenu(m);
         if (t.dataset.confirm && confirmDialog) {
           showConfirm(t, () => fireRequests(t));
         } else {
@@ -250,7 +255,7 @@
     statusItem.addEventListener('click', function(e) {
       e.preventDefault();
       const m = e.target.closest('.menu-items');
-      if (m) setMenuOpen(m, false);
+      if (m) dismissMenu(m);
       if (!statusDialog.open) {
         statusDialog.showModal();
         // Pointer opens drop the focus ring from the autofocused close
