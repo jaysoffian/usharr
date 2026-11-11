@@ -207,6 +207,7 @@
   }
   document.addEventListener('keydown', function(e) {
     if (e.target.closest('input,textarea')) return;
+    if (document.querySelector('dialog:modal, .menu-items:not([hidden])')) return;
     if (e.key === 'Escape') { window.location = back; return; }
     // Shift = jump by season, Alt = jump by show, else = episode.
     if (e.key === 'ArrowLeft') {

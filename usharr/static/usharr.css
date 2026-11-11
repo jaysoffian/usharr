@@ -26,6 +26,8 @@
   --err-fg: #a80000;
   --border: #dcdce0;
 }
+html[data-theme="dark"]  { color-scheme: dark; }
+html[data-theme="light"] { color-scheme: light; }
 
 /* System-preference dark — defers to an explicit light override. */
 @media (prefers-color-scheme: dark) {

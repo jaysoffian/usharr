@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}usharr{% endblock %}</title>
+<meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="/static/icons/usharr.svg">
 <script>
 (function() {
-  var t = localStorage.getItem('theme');
+  var t;
+  try { t = localStorage.getItem('theme'); } catch (e) {}
   if (t === 'light' || t === 'dark') {
     document.documentElement.setAttribute('data-theme', t);
   }
@@ -82,10 +84,15 @@
   // topbar brand-as-menu and a detail-page ⋮. Opening one closes the
   // others.
   const menus = Array.from(document.querySelectorAll('.menu'));
+  function setMenuOpen(items, open) {
+    items.hidden = !open;
+    const btn = items.closest('.menu').querySelector('.menu-btn');
+    if (btn) btn.setAttribute('aria-expanded', String(open));
+  }
   function closeAllBut(keep) {
     menus.forEach(m => {
       const items = m.querySelector('.menu-items');
-      if (items && items !== keep) items.setAttribute('hidden', '');
+      if (items && items !== keep) setMenuOpen(items, false);
     });
   }
   menus.forEach(menu => {
@@ -95,8 +102,14 @@
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
       closeAllBut(items);
-      items.toggleAttribute('hidden');
+      setMenuOpen(items, items.hidden);
     });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    const open = document.querySelector('.menu-items:not([hidden])');
+    if (!open) return;
+    setMenuOpen(open, false);
   });
   const confirmDialog = document.getElementById('confirm-dialog');
   // macOS-style flash: blink the highlight twice before the menu closes
@@ -142,7 +155,7 @@
       // confirm dialog.
       flashItem(t, () => {
         const m = t.closest('.menu-items');
-        if (m) m.setAttribute('hidden', '');
+        if (m) setMenuOpen(m, false);
         if (t.dataset.confirm && confirmDialog) {
           showConfirm(t, () => fireRequests(t));
         } else {
@@ -166,19 +179,30 @@
     const svgs = {auto: SVG_AUTO, light: SVG_LIGHT, dark: SVG_DARK};
     const titles = {auto: 'Theme: Auto (follows system)', light: 'Theme: Light', dark: 'Theme: Dark'};
     const next = {auto: 'light', light: 'dark', dark: 'auto'};
+    function normalize(t) { return t === 'light' || t === 'dark' ? t : 'auto'; }
+    function loadTheme() {
+      try { return normalize(localStorage.getItem('theme')); } catch (err) { return 'auto'; }
+    }
+    function saveTheme(t) {
+      try { localStorage.setItem('theme', t); } catch (err) { /* applies for this page only */ }
+    }
+    let cur;
     function apply(t) {
+      cur = t;
       if (t === 'auto') document.documentElement.removeAttribute('data-theme');
       else document.documentElement.setAttribute('data-theme', t);
       themeBtn.innerHTML = svgs[t];
       themeBtn.title = titles[t];
     }
-    apply(localStorage.getItem('theme') || 'auto');
+    apply(loadTheme());
     themeBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      const cur = localStorage.getItem('theme') || 'auto';
       const n = next[cur];
-      localStorage.setItem('theme', n);
+      saveTheme(n);
       apply(n);
+    });
+    window.addEventListener('storage', function(e) {
+      if (e.key === 'theme' || e.key === null) apply(normalize(e.newValue));
     });
   }
 
@@ -218,7 +242,7 @@
     statusItem.addEventListener('click', function(e) {
       e.preventDefault();
       const m = e.target.closest('.menu-items');
-      if (m) m.setAttribute('hidden', '');
+      if (m) setMenuOpen(m, false);
       if (!statusDialog.open) statusDialog.showModal();
     });
     try {
