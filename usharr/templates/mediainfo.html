@@ -13,8 +13,8 @@
 {% for title, rows in r.sections %}
 {% if not loop.first %}<tbody class="gap"><tr><td colspan="2"></td></tr></tbody>{% endif %}
 <tbody>
-  <tr class="section"><th colspan="2"><h3>{{ title }}</h3></th></tr>
-  {% for key, value in rows %}<tr><th>{{ key }}</th><td>{{ value }}</td></tr>
+  <tr class="section"><th colspan="2" scope="rowgroup"><h3>{{ title }}</h3></th></tr>
+  {% for key, value in rows %}<tr><th scope="row">{{ key }}</th><td>{{ value }}</td></tr>
   {% endfor %}
 </tbody>
 {% endfor %}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ label }} — usharr{% endblock %}
 {% block content %}
+<h1 class="visually-hidden">{{ label }}</h1>
 {% if rows %}
 <div class="table-pad"></div>
 <nav class="letter-rail" aria-label="Jump to letter">
@@ -11,7 +12,7 @@
 <table class="library">
 <thead{% if is_tv %} class="clickable"{% endif %}>
   <tr>
-    <th>Title <span class="th-count">({% if episodes is not none %}{{ titles }} / {{ episodes }}{% else %}{{ titles }}{% endif %})</span></th>
+    <th>{% if is_tv %}<button type="button" class="row-toggle" aria-expanded="true">{% endif %}Title <span class="th-count">({% if episodes is not none %}{{ titles }} / {{ episodes }}{% else %}{{ titles }}{% endif %})</span>{% if is_tv %}</button>{% endif %}</th>
     <th class="narrow">Year</th>
     <th class="narrow">AR</th>
     <th>Video</th>
@@ -25,11 +26,11 @@
   {% set L = jump_letters[loop.index0] %}
   {% if r.kind == "show" %}
   <tr class="show-header" data-show-title="{{ r.show_title }}"{% if L %} id="jump-{{ L }}"{% endif %}>
-    <td class="title show-title" colspan="7">{{ r.display_title }}{% if r.season_count and r.episode_count %}<span class="show-counts"> · {{ r.season_count }} season{{ 's' if r.season_count != 1 else '' }} · {{ r.episode_count }} episode{{ 's' if r.episode_count != 1 else '' }}</span>{% endif %}</td>
+    <td class="title show-title" colspan="7"><button type="button" class="row-toggle" aria-expanded="true">{{ r.display_title }}{% if r.season_count and r.episode_count %}<span class="show-counts"> · {{ r.season_count }} season{{ 's' if r.season_count != 1 else '' }} · {{ r.episode_count }} episode{{ 's' if r.episode_count != 1 else '' }}</span>{% endif %}</button></td>
   </tr>
   {% elif r.kind == "season" %}
   <tr class="season-header" data-show-title="{{ r.show_title }}" data-season-num="{{ r.season_number }}">
-    <td class="title season-title" colspan="7">{{ r.display_title }}</td>
+    <td class="title season-title" colspan="7"><button type="button" class="row-toggle" aria-expanded="true">{{ r.display_title }}</button></td>
   </tr>
   {% else %}
   {% set sc = sub_chip(r) %}
@@ -55,11 +56,11 @@
     </td>
     <td class="narrow links">
       <span class="svc-group">
-        {% if u_plex %}<a class="svc svc-plex" href="{{ u_plex }}" target="_blank" rel="noopener" title="Plex"></a>{% endif %}
-        {% if u_tautulli %}<a class="svc svc-tautulli" href="{{ u_tautulli }}" target="_blank" rel="noopener" title="Tautulli"></a>{% endif %}
-        {% if u_bazarr %}<a class="svc svc-bazarr" href="{{ u_bazarr }}" target="_blank" rel="noopener" title="Bazarr"></a>{% endif %}
-        {% if u_radarr %}<a class="svc svc-radarr" href="{{ u_radarr }}" target="_blank" rel="noopener" title="Radarr"></a>{% endif %}
-        {% if u_sonarr %}<a class="svc svc-sonarr" href="{{ u_sonarr }}" target="_blank" rel="noopener" title="Sonarr"></a>{% endif %}
+        {% if u_plex %}<a class="svc svc-plex" href="{{ u_plex }}" target="_blank" rel="noopener" title="Plex" aria-label="Plex"></a>{% endif %}
+        {% if u_tautulli %}<a class="svc svc-tautulli" href="{{ u_tautulli }}" target="_blank" rel="noopener" title="Tautulli" aria-label="Tautulli"></a>{% endif %}
+        {% if u_bazarr %}<a class="svc svc-bazarr" href="{{ u_bazarr }}" target="_blank" rel="noopener" title="Bazarr" aria-label="Bazarr"></a>{% endif %}
+        {% if u_radarr %}<a class="svc svc-radarr" href="{{ u_radarr }}" target="_blank" rel="noopener" title="Radarr" aria-label="Radarr"></a>{% endif %}
+        {% if u_sonarr %}<a class="svc svc-sonarr" href="{{ u_sonarr }}" target="_blank" rel="noopener" title="Sonarr" aria-label="Sonarr"></a>{% endif %}
       </span>
     </td>
   </tr>
@@ -107,6 +108,13 @@
     episodesByKey.get(key).push(tr);
   });
   const collapsed = new Set();
+  const headerToggles = [...tbody.querySelectorAll('tr.show-header, tr.season-header')].map(tr => ({
+    btn: tr.querySelector('.row-toggle'),
+    keys: tr.classList.contains('season-header')
+      ? [seasonKey(tr.dataset.showTitle, tr.dataset.seasonNum)]
+      : showKeys(tr.dataset.showTitle),
+  }));
+  const theadToggle = document.querySelector('table.library thead .row-toggle');
 
   const table = tbody.parentElement;
   function applyCollapse() {
@@ -114,11 +122,15 @@
       const hide = collapsed.has(key);
       rows.forEach(r => { r.style.display = hide ? 'none' : ''; });
     });
+    headerToggles.forEach(h => {
+      h.btn.setAttribute('aria-expanded', String(h.keys.some(k => !collapsed.has(k))));
+    });
     // Reflect fully-collapsed state for CSS (hides non-Title column
     // labels so the thead reads as a single clickable "Title" band).
     const allCollapsed = episodesByKey.size > 0 &&
       [...episodesByKey.keys()].every(k => collapsed.has(k));
     table.classList.toggle('all-collapsed', allCollapsed);
+    if (theadToggle) theadToggle.setAttribute('aria-expanded', String(!allCollapsed));
   }
 
   function seasonKey(show, season) { return show + '\t' + season; }
@@ -160,7 +172,7 @@
 
   // --- dispatch clicks on tbody rows ---
   tbody.addEventListener('click', function(e) {
-    if (e.target.closest('a,button,form')) return;
+    if (e.target.closest('a,form,button:not(.row-toggle)')) return;
     const showHeader = e.target.closest('tr.show-header');
     if (showHeader) { toggleShow(showHeader.dataset.showTitle); return; }
     const seasonHeader = e.target.closest('tr.season-header');

@@ -21,7 +21,7 @@
 <nav class="topbar">
   {% block topbar_left %}
   <div class="menu menu-left">
-    <button class="brand menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="Library actions"><span class="brand-icon" aria-hidden="true"></span></button>
+    <button class="brand menu-btn" aria-expanded="false" aria-label="Library actions"><span class="brand-icon" aria-hidden="true"></span></button>
     <ul class="menu-items" hidden>
       <li><button data-trigger="/api/task/scan">Scan Library</button></li>
       <li><button data-trigger="/api/task/refresh">Refresh Library</button></li>
@@ -44,20 +44,19 @@
 <main>
   {% block content %}{% endblock %}
 </main>
-<dialog id="confirm-dialog">
+<dialog id="confirm-dialog" aria-labelledby="confirm-dialog-title">
   <form method="dialog">
-    <h3 class="dialog-title"></h3>
+    <h3 class="dialog-title" id="confirm-dialog-title"></h3>
     <p class="dialog-body"></p>
     <div class="dialog-actions">
-      <button value="cancel">Cancel</button>
+      <button value="cancel" autofocus>Cancel</button>
       <button value="ok" class="dialog-primary"></button>
     </div>
   </form>
 </dialog>
-<dialog id="status-dialog">
+<dialog id="status-dialog" aria-label="Status">
   <form method="dialog">
-    <div autofocus tabindex="-1" aria-hidden="true" class="status-focus-trap"></div>
-    <button class="status-close" value="close" aria-label="Close"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg></button>
+    <button class="status-close" value="close" aria-label="Close" autofocus><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg></button>
     <div class="status-line" data-kind="aspect_ratio" hidden>
       <div class="status-main"><span class="status-label">Analyzing</span> <span class="status-path"></span></div>
       <div class="status-rem"></div>
@@ -110,6 +109,13 @@
     const open = document.querySelector('.menu-items:not([hidden])');
     if (!open) return;
     setMenuOpen(open, false);
+    open.closest('.menu').querySelector('.menu-btn').focus();
+  });
+  document.addEventListener('focusin', function(e) {
+    menus.forEach(m => {
+      const items = m.querySelector('.menu-items');
+      if (items && !items.hidden && !m.contains(e.target)) setMenuOpen(items, false);
+    });
   });
   const confirmDialog = document.getElementById('confirm-dialog');
   // macOS-style flash: blink the highlight twice before the menu closes
@@ -193,6 +199,7 @@
       else document.documentElement.setAttribute('data-theme', t);
       themeBtn.innerHTML = svgs[t];
       themeBtn.title = titles[t];
+      themeBtn.setAttribute('aria-label', titles[t]);
     }
     apply(loadTheme());
     themeBtn.addEventListener('click', function(e) {
@@ -243,7 +250,16 @@
       e.preventDefault();
       const m = e.target.closest('.menu-items');
       if (m) setMenuOpen(m, false);
-      if (!statusDialog.open) statusDialog.showModal();
+      if (!statusDialog.open) {
+        statusDialog.showModal();
+        // Pointer opens drop the focus ring from the autofocused close
+        // button. focus() is a no-op on the focused element, hence blur().
+        if (e.detail) {
+          const closeBtn = statusDialog.querySelector('.status-close');
+          closeBtn.blur();
+          closeBtn.focus({focusVisible: false});
+        }
+      }
     });
     try {
       const es = new EventSource('/api/status');

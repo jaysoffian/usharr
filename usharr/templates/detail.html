@@ -5,30 +5,30 @@
   {% if frame %}{% set x, y, w, h = frame.crop_rect(crop_w, crop_h) %}<svg viewBox="0 0 1920 1080" width="25" height="14" aria-hidden="true"><rect x="0" y="0" width="1920" height="1080" fill="#000" stroke="currentColor" vector-effect="non-scaling-stroke"/><rect x="{{ x }}" y="{{ y }}" width="{{ w }}" height="{{ h }}" fill="#c8c8c8"/></svg>{% endif %}
 {%- endmacro %}
 
-{% macro item_grid(mf, mi, ar, audio, subtitle, sub_exts, aspect_set, duration_str) %}
+{% macro item_grid(mf, mi, ar, audio, subtitle, sub_exts, aspect_set, duration_str, heading='h2') %}
 <div class="detail-grid">
 
 <section>
-<h3>Video</h3>
+<{{ heading }}>Video</{{ heading }}>
 <table class="kv">
-  <tr><th>Codec</th><td>{{ (mi.video_codec if mi else None)|dash }}</td></tr>
-  <tr><th>Profile</th><td>{{ (mi.video_profile if mi else None)|dash }}</td></tr>
+  <tr><th scope="row">Codec</th><td>{{ (mi.video_codec if mi else None)|dash }}</td></tr>
+  <tr><th scope="row">Profile</th><td>{{ (mi.video_profile if mi else None)|dash }}</td></tr>
   {% set vw = mi.video_width if mi else None %}
   {% set vh = mi.video_height if mi else None %}
   {% set bucket = resolution_bucket(vw, vh) %}
-  <tr><th>Resolution</th><td>{{ (vw or '?')|string + '×' + (vh or '?')|string }}{% if bucket %} <span class="subtle">({{ bucket }})</span>{% endif %}</td></tr>
-  <tr><th>Bit depth</th><td>{{ (mi.video_bit_depth|string + ' bit') if mi and mi.video_bit_depth else '—' }}</td></tr>
-  <tr><th>HDR</th><td>{{ (mi.video_hdr if mi else None)|dash }}{% if mi and mi.video_hdr_format %}<div class="subtle">{{ mi.video_hdr_format }}</div>{% endif %}</td></tr>
-  <tr><th>Color</th><td>{{ color(ar) }}</td></tr>
-  <tr><th>Frame rate</th><td>{{ (mi.video_frame_rate if mi else None)|dash }}</td></tr>
-  <tr><th>Bit rate</th><td>{{ ('%.1f Mbps' % (mi.video_bit_rate / 1000000)) if mi and mi.video_bit_rate else '—' }}{% if mi and mi.video_max_bit_rate %} <span class="subtle">({{ '%.1f' % (mi.video_max_bit_rate / 1000000) }} max)</span>{% endif %}</td></tr>
-  <tr><th>Container</th><td>{{ (mi.container if mi else None)|dash }}</td></tr>
-  <tr><th>Duration</th><td>{{ duration_str }}</td></tr>
+  <tr><th scope="row">Resolution</th><td>{{ (vw or '?')|string + '×' + (vh or '?')|string }}{% if bucket %} <span class="subtle">({{ bucket }})</span>{% endif %}</td></tr>
+  <tr><th scope="row">Bit depth</th><td>{{ (mi.video_bit_depth|string + ' bit') if mi and mi.video_bit_depth else '—' }}</td></tr>
+  <tr><th scope="row">HDR</th><td>{{ (mi.video_hdr if mi else None)|dash }}{% if mi and mi.video_hdr_format %}<div class="subtle">{{ mi.video_hdr_format }}</div>{% endif %}</td></tr>
+  <tr><th scope="row">Color</th><td>{{ color(ar) }}</td></tr>
+  <tr><th scope="row">Frame rate</th><td>{{ (mi.video_frame_rate if mi else None)|dash }}</td></tr>
+  <tr><th scope="row">Bit rate</th><td>{{ ('%.1f Mbps' % (mi.video_bit_rate / 1000000)) if mi and mi.video_bit_rate else '—' }}{% if mi and mi.video_max_bit_rate %} <span class="subtle">({{ '%.1f' % (mi.video_max_bit_rate / 1000000) }} max)</span>{% endif %}</td></tr>
+  <tr><th scope="row">Container</th><td>{{ (mi.container if mi else None)|dash }}</td></tr>
+  <tr><th scope="row">Duration</th><td>{{ duration_str }}</td></tr>
 </table>
 </section>
 
 <section>
-<h3>Aspect ratios</h3>
+<{{ heading }}>Aspect ratios</{{ heading }}>
 {% if aspect_set %}
 {% set frame = display_frame(ar) %}
 <table class="ars-table">
@@ -67,7 +67,7 @@
 </section>
 
 <section>
-<h3>Audio</h3>
+<{{ heading }}>Audio</{{ heading }}>
 {% if audio %}
 <table class="tracks">
   <thead><tr>
@@ -93,7 +93,7 @@
 </section>
 
 <section>
-<h3>Subtitles</h3>
+<{{ heading }}>Subtitles</{{ heading }}>
 {% if subtitle %}
 <table class="tracks">
   <thead><tr><th>#</th><th>Format</th><th>Lang</th><th>Title</th><th>Default</th><th>Forced</th><th>SDH</th><th>File</th></tr></thead>
@@ -128,7 +128,7 @@
   {% if path %}<a href="/item?path={{ path|urlencode }}">{{ label }}</a>{% else %}<span class="disabled">{{ label }}</span>{% endif %}
 {%- endmacro %}
 {% macro nav_kebab(label) -%}
-  <button class="menu-btn nav-kebab" aria-haspopup="true" aria-expanded="false" aria-label="{{ label }}"><svg viewBox="0 0 48 48" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="24" cy="12" r="3"/><circle cx="24" cy="24" r="3"/><circle cx="24" cy="36" r="3"/></svg></button>
+  <button class="menu-btn nav-kebab" aria-expanded="false" aria-label="{{ label }}"><svg viewBox="0 0 48 48" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="24" cy="12" r="3"/><circle cx="24" cy="24" r="3"/><circle cx="24" cy="36" r="3"/></svg></button>
 {%- endmacro %}
 {% block content %}
 <nav class="detail-nav">
@@ -154,12 +154,12 @@
   {% if next_path %}<a class="btn" href="/item?path={{ next_path|urlencode }}">Next ▶</a>{% else %}<span class="btn disabled">Next ▶</span>{% endif %}
   {% endif %}
   <div class="svc-group">
-    <a class="svc svc-mediainfo" href="/item/mediainfo?path={{ mf.path|urlencode }}" target="_blank" rel="noopener" title="MediaInfo"></a>
-    {% if plex_url %}<a class="svc svc-plex" href="{{ plex_url }}" target="_blank" rel="noopener" title="Plex"></a>{% endif %}
-    {% if tautulli_url %}<a class="svc svc-tautulli" href="{{ tautulli_url }}" target="_blank" rel="noopener" title="Tautulli"></a>{% endif %}
-    {% if bazarr_url %}<a class="svc svc-bazarr" href="{{ bazarr_url }}" target="_blank" rel="noopener" title="Bazarr"></a>{% endif %}
-    {% if radarr_url %}<a class="svc svc-radarr" href="{{ radarr_url }}" target="_blank" rel="noopener" title="Radarr"></a>{% endif %}
-    {% if sonarr_url %}<a class="svc svc-sonarr" href="{{ sonarr_url }}" target="_blank" rel="noopener" title="Sonarr"></a>{% endif %}
+    <a class="svc svc-mediainfo" href="/item/mediainfo?path={{ mf.path|urlencode }}" target="_blank" rel="noopener" title="MediaInfo" aria-label="MediaInfo"></a>
+    {% if plex_url %}<a class="svc svc-plex" href="{{ plex_url }}" target="_blank" rel="noopener" title="Plex" aria-label="Plex"></a>{% endif %}
+    {% if tautulli_url %}<a class="svc svc-tautulli" href="{{ tautulli_url }}" target="_blank" rel="noopener" title="Tautulli" aria-label="Tautulli"></a>{% endif %}
+    {% if bazarr_url %}<a class="svc svc-bazarr" href="{{ bazarr_url }}" target="_blank" rel="noopener" title="Bazarr" aria-label="Bazarr"></a>{% endif %}
+    {% if radarr_url %}<a class="svc svc-radarr" href="{{ radarr_url }}" target="_blank" rel="noopener" title="Radarr" aria-label="Radarr"></a>{% endif %}
+    {% if sonarr_url %}<a class="svc svc-sonarr" href="{{ sonarr_url }}" target="_blank" rel="noopener" title="Sonarr" aria-label="Sonarr"></a>{% endif %}
   </div>
   {% if mi_badges %}
   <div class="mi-badges">
@@ -172,7 +172,7 @@
   <div class="title-line">
     <h1>{{ display_title }}{% if edition %} <span class="edition">{{ edition }}</span>{% endif %}{% if year %} <span class="year">({{ year }})</span>{% endif %}</h1>
     <div class="menu menu-left">
-      <button class="menu-btn icon-btn" aria-haspopup="true" aria-expanded="false" aria-label="More actions"><svg viewBox="0 0 48 48" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="24" cy="12" r="3"/><circle cx="24" cy="24" r="3"/><circle cx="24" cy="36" r="3"/></svg></button>
+      <button class="menu-btn icon-btn" aria-expanded="false" aria-label="More actions"><svg viewBox="0 0 48 48" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="24" cy="12" r="3"/><circle cx="24" cy="24" r="3"/><circle cx="24" cy="36" r="3"/></svg></button>
       <ul class="menu-items" hidden>
         <li><button data-trigger="/api/task/refresh{{ mf.path|pathencode }}">Refresh</button></li>
         <li><button data-trigger="/api/task/analyze{{ mf.path|pathencode }}">Analyze</button></li>
@@ -190,7 +190,7 @@
   <h2>{{ e.display_title }}{% if e.edition %} <span class="edition">{{ e.edition }}</span>{% endif %}{% if e.year %} <span class="year">({{ e.year }})</span>{% endif %}</h2>
   <div class="path"><code>{{ e.mf.path }}</code></div>
 </header>
-{{ item_grid(e.mf, e.mi, e.ar, e.audio, e.subtitle, e.sub_exts, e.aspect_set, e.duration_str) }}
+{{ item_grid(e.mf, e.mi, e.ar, e.audio, e.subtitle, e.sub_exts, e.aspect_set, e.duration_str, 'h3') }}
 {% endfor %}
 
 <script>
