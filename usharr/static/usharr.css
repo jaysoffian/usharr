@@ -1,7 +1,8 @@
 /*
- * Theme vars — light palette is the default; dark activates via
- * prefers-color-scheme OR an explicit html[data-theme="dark"] override
- * (set by the topbar theme toggle and persisted in localStorage).
+ * Theme vars — each color is light-dark(light, dark), resolved by
+ * color-scheme: the system preference by default, or the explicit
+ * html[data-theme] override set by the topbar theme toggle and
+ * persisted in localStorage.
  */
 :root {
   color-scheme: light dark;
@@ -14,52 +15,20 @@
    * one row tall. Rendered as a sticky shim so it doesn't scroll
    * away (and cause jank). */
   --table-pad: 28px;
-  --bg: #ffffff;
-  --bg-alt: #f4f4f6;
-  --bg-row: #ffffff;
-  --bg-row-hover: #eaeaef;
-  --bg-highlight: #c0c0c0;
-  --fg: #1a1a1c;
-  --fg-dim: #6a6a72;
-  --accent: #333333;
-  --err-bg: #fce4e4;
-  --err-fg: #a80000;
-  --border: #dcdce0;
+  --bg: light-dark(#ffffff, #1a1a1c);
+  --bg-alt: light-dark(#f4f4f6, #232326);
+  --bg-row: light-dark(#ffffff, #202023);
+  --bg-row-hover: light-dark(#eaeaef, #2d2d32);
+  --bg-highlight: light-dark(#c0c0c0, #3a3a3a);
+  --fg: light-dark(#1a1a1c, #e8e8ea);
+  --fg-dim: light-dark(#6a6a72, #9b9ba1);
+  --accent: light-dark(#333333, #dddddd);
+  --err-bg: light-dark(#fce4e4, #3a2424);
+  --err-fg: light-dark(#a80000, #ff9c9c);
+  --border: light-dark(#dcdce0, #333338);
 }
 html[data-theme="dark"]  { color-scheme: dark; }
 html[data-theme="light"] { color-scheme: light; }
-
-/* System-preference dark — defers to an explicit light override. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #1a1a1c;
-    --bg-alt: #232326;
-    --bg-row: #202023;
-    --bg-row-hover: #2d2d32;
-    --bg-highlight: #3a3a3a;
-    --fg: #e8e8ea;
-    --fg-dim: #9b9ba1;
-    --accent: #dddddd;
-    --err-bg: #3a2424;
-    --err-fg: #ff9c9c;
-    --border: #333338;
-  }
-}
-
-/* Explicit user override (sticky via localStorage). */
-html[data-theme="dark"] {
-    --bg: #1a1a1c;
-    --bg-alt: #232326;
-    --bg-row: #202023;
-    --bg-row-hover: #2d2d32;
-    --bg-highlight: #3a3a3a;
-    --fg: #e8e8ea;
-    --fg-dim: #9b9ba1;
-    --accent: #dddddd;
-    --err-bg: #3a2424;
-    --err-fg: #ff9c9c;
-    --border: #333338;
-  }
 
 * { box-sizing: border-box; }
 
@@ -327,6 +296,7 @@ dialog::backdrop { overflow: hidden; overscroll-behavior: contain; }
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
   overflow-wrap: anywhere;
 }
@@ -879,7 +849,7 @@ pre.err {
  * tablets still get the full desktop layout. */
 @media (max-width: 600px) {
   /* Topbar wraps onto a second row when brand + library tabs + actions
-   * outgrow the viewport. The JS resize listener republishes
+   * outgrow the viewport. The JS ResizeObserver republishes
    * --topbar-h, so the sticky chain follows the new height. */
   .topbar { flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
   .topbar ul.tabs { flex-wrap: wrap; }

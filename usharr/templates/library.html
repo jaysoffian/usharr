@@ -83,7 +83,7 @@
   if (thead) {
     const setTheadH = () => document.documentElement.style.setProperty('--thead-h', thead.offsetHeight + 'px');
     setTheadH();
-    window.addEventListener('resize', setTheadH);
+    new ResizeObserver(setTheadH).observe(thead, {box: 'border-box'});
   }
 
   // --- episode row → detail navigation (unchanged) ---

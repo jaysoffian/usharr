@@ -77,7 +77,7 @@
   if (topbar) {
     const setTopbarH = () => document.documentElement.style.setProperty('--topbar-h', topbar.offsetHeight + 'px');
     setTopbarH();
-    window.addEventListener('resize', setTopbarH);
+    new ResizeObserver(setTopbarH).observe(topbar, {box: 'border-box'});
   }
 
   // Support multiple .menu instances on the same page — e.g. the
